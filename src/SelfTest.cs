@@ -11,25 +11,52 @@ public static class SelfTest
     {
         var aggregator = new EventAggregator();
         aggregator.Add(new EventRecord("Alpha", "stream-a", false, 10, 18));
-        aggregator.Add(new EventRecord("Alpha", "stream-a", false, 14, 22));
-        aggregator.Add(new EventRecord("Beta", "stream-b", true, 5, 11));
+        aggregator.Add(new EventRecord("Alpha", "stream-b", false, 14, 22));
 
         var groups = aggregator.Snapshot();
-        if (groups.Count != 2)
+        if (groups.Count != 1)
         {
-            throw new InvalidOperationException($"Expected 2 groups, found {groups.Count}.");
+            throw new InvalidOperationException($"Expected 1 group, found {groups.Count}.");
         }
 
         var alpha = groups.Single(x => x.EventType == "Alpha");
-        if (alpha.TotalCount != 2 || alpha.TotalPayloadSize != 24 || alpha.TotalRecordSize != 40 || Math.Abs(alpha.AvgPayloadSizePerEvent - 12) > 0.0001 || Math.Abs(alpha.AvgRecordSizePerEvent - 20) > 0.0001)
+        if (alpha.IsLinkedEvent || alpha.SourceStream != "multiple" || alpha.TotalCount != 2 || alpha.TotalPayloadSize != 24 || alpha.TotalRecordSize != 40 || Math.Abs(alpha.AvgPayloadSizePerEvent - 12) > 0.0001 || Math.Abs(alpha.AvgRecordSizePerEvent - 20) > 0.0001)
         {
             throw new InvalidOperationException("Alpha aggregate check failed.");
         }
 
-        var beta = groups.Single(x => x.EventType == "Beta");
-        if (!beta.IsLinkedEvent || beta.TotalCount != 1 || beta.TotalPayloadSize != 5 || beta.TotalRecordSize != 11)
+        var linkedAggregator = new EventAggregator();
+        linkedAggregator.Add(new EventRecord("OrganisationProductCreatedEvent", "OrganisationProductCreatedEvent", false, 10, 18));
+        linkedAggregator.Add(new EventRecord(EventTypeName.Format("OrganisationProductCreatedEvent", "$et-OrganisationProductCreatedEvent", true), "$et-OrganisationProductCreatedEvent", true, 5, 11));
+        linkedAggregator.Add(new EventRecord(EventTypeName.Format("OrganisationProductCreatedEvent", "$ce-OrganisationAggregate", true), "$ce-OrganisationAggregate", true, 5, 11));
+
+        var linkedGroups = linkedAggregator.Snapshot();
+        if (linkedGroups.Count != 3)
         {
-            throw new InvalidOperationException("Beta aggregate check failed.");
+            throw new InvalidOperationException($"Expected 3 linked groups, found {linkedGroups.Count}.");
+        }
+
+        if (linkedGroups[0].EventType != "OrganisationProductCreatedEvent" || linkedGroups[1].EventType != "OrganisationProductCreatedEvent-$et-OrganisationProductCreatedEvent" || linkedGroups[2].EventType != "OrganisationProductCreatedEvent-$ce-OrganisationAggregate")
+        {
+            throw new InvalidOperationException("Linked group ordering check failed.");
+        }
+
+        var baseGroup = linkedGroups[0];
+        if (baseGroup.IsLinkedEvent || baseGroup.SourceStream != "OrganisationProductCreatedEvent" || baseGroup.TotalCount != 1 || baseGroup.TotalPayloadSize != 10 || baseGroup.TotalRecordSize != 18)
+        {
+            throw new InvalidOperationException("Base linked aggregate check failed.");
+        }
+
+        var etGroup = linkedGroups[1];
+        if (!etGroup.IsLinkedEvent || etGroup.SourceStream != "$et-OrganisationProductCreatedEvent" || etGroup.TotalCount != 1 || etGroup.TotalPayloadSize != 5 || etGroup.TotalRecordSize != 11)
+        {
+            throw new InvalidOperationException("ET linked aggregate check failed.");
+        }
+
+        var ceGroup = linkedGroups[2];
+        if (!ceGroup.IsLinkedEvent || ceGroup.SourceStream != "$ce-OrganisationAggregate" || ceGroup.TotalCount != 1 || ceGroup.TotalPayloadSize != 5 || ceGroup.TotalRecordSize != 11)
+        {
+            throw new InvalidOperationException("CE linked aggregate check failed.");
         }
 
         var report = new ReportEnvelope(

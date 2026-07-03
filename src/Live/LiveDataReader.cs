@@ -1,3 +1,4 @@
+using ESAnalyser.Analysis;
 using AnalysisEventRecord = ESAnalyser.Analysis.EventRecord;
 using KurrentDB.Client;
 
@@ -25,7 +26,7 @@ public static class LiveDataReader
             var isLinked = resolved.IsResolved;
             var payloadSize = original.Data.Length + original.Metadata.Length;
 
-            records.Add(new AnalysisEventRecord(eventType, sourceStream, isLinked, payloadSize, payloadSize));
+            records.Add(new AnalysisEventRecord(EventTypeName.Format(eventType, sourceStream, isLinked), sourceStream, isLinked, payloadSize, payloadSize));
         }
 
         return records;

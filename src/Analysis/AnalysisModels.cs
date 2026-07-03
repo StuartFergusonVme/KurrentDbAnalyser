@@ -2,6 +2,12 @@ using System.Text.Json.Serialization;
 
 namespace ESAnalyser.Analysis;
 
+internal static class EventTypeName
+{
+    public static string Format(string eventType, string sourceStream, bool isLinkedEvent) =>
+        isLinkedEvent ? $"{eventType}-{sourceStream}" : eventType;
+}
+
 public sealed record EventRecord(
     string EventType,
     string SourceStream,

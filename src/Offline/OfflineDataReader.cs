@@ -111,7 +111,8 @@ public static class OfflineDataReader
                     nextEventNumbers[record.StreamName] = eventNumber + 1;
                 }
 
-                yield return new LogicalAnalysisRecord(new AnalysisEventRecord(resolvedEventType, record.StreamName, record.IsLinkedEvent, record.PayloadSize, record.RecordSize), record.TimestampUtc);
+                var displayEventType = EventTypeName.Format(resolvedEventType, record.StreamName, record.IsLinkedEvent);
+                yield return new LogicalAnalysisRecord(new AnalysisEventRecord(displayEventType, record.StreamName, record.IsLinkedEvent, record.PayloadSize, record.RecordSize), record.TimestampUtc);
             }
         }
     }
@@ -128,15 +129,15 @@ public static class OfflineDataReader
                 {
                     if (sourceEventTypes.TryGetValue((record.LinkTargetStream, record.LinkTargetEventNumber.Value), out var resolvedEventType))
                     {
-                        yield return new LogicalAnalysisRecord(new AnalysisEventRecord(resolvedEventType, record.StreamName, true, record.PayloadSize, record.RecordSize), record.TimestampUtc);
+                        yield return new LogicalAnalysisRecord(new AnalysisEventRecord(EventTypeName.Format(resolvedEventType, record.StreamName, true), record.StreamName, true, record.PayloadSize, record.RecordSize), record.TimestampUtc);
                         continue;
                     }
 
-                    yield return new LogicalAnalysisRecord(new AnalysisEventRecord(record.EventType, record.StreamName, true, record.PayloadSize, record.RecordSize), record.TimestampUtc);
+                    yield return new LogicalAnalysisRecord(new AnalysisEventRecord(EventTypeName.Format(record.EventType, record.StreamName, true), record.StreamName, true, record.PayloadSize, record.RecordSize), record.TimestampUtc);
                     continue;
                 }
 
-                yield return new LogicalAnalysisRecord(new AnalysisEventRecord(record.EventType, record.StreamName, false, record.PayloadSize, record.RecordSize), record.TimestampUtc);
+                yield return new LogicalAnalysisRecord(new AnalysisEventRecord(EventTypeName.Format(record.EventType, record.StreamName, false), record.StreamName, false, record.PayloadSize, record.RecordSize), record.TimestampUtc);
             }
         }
     }
