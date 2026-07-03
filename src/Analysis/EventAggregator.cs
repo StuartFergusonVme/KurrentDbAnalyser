@@ -6,6 +6,7 @@ namespace ESAnalyser.Analysis;
 public sealed class EventAggregator
 {
     private readonly Dictionary<(string EventType, bool IsLinkedEvent), GroupState> _groups = new();
+    private long _nextGroupOrder;
 
     public void Add(EventRecord record)
     {
@@ -19,7 +20,7 @@ public sealed class EventAggregator
             return;
         }
 
-        _groups[key] = new GroupState(record.SourceStream, 1, record.PayloadSize, record.RecordSize);
+        _groups[key] = new GroupState(_nextGroupOrder++, record.SourceStream, 1, record.PayloadSize, record.RecordSize);
     }
 
     public void AddGroup(EventGroup group)
@@ -34,11 +35,12 @@ public sealed class EventAggregator
             return;
         }
 
-        _groups[key] = new GroupState(group.SourceStream, group.TotalCount, group.TotalPayloadSize, group.TotalRecordSize);
+        _groups[key] = new GroupState(_nextGroupOrder++, group.SourceStream, group.TotalCount, group.TotalPayloadSize, group.TotalRecordSize);
     }
 
     public IReadOnlyList<EventGroup> Snapshot() =>
         _groups
+            .OrderBy(pair => pair.Value.Order)
             .Select(pair => new EventGroup(
                 pair.Key.EventType,
                 pair.Value.SourceStream,
@@ -48,23 +50,23 @@ public sealed class EventAggregator
                 pair.Value.Count == 0 ? 0 : (double)pair.Value.PayloadSize / pair.Value.Count,
                 pair.Value.RecordSize,
                 pair.Value.Count == 0 ? 0 : (double)pair.Value.RecordSize / pair.Value.Count))
-            .OrderByDescending(x => x.TotalPayloadSize)
-            .ThenBy(x => x.EventType, StringComparer.Ordinal)
-            .ThenBy(x => x.IsLinkedEvent)
             .ToList();
 
     private sealed class GroupState
     {
-        private string _sourceStream;
-        private bool _multipleSourceStreams;
-
-        public GroupState(string sourceStream, long count, long payloadSize, long recordSize)
+        public GroupState(long order, string sourceStream, long count, long payloadSize, long recordSize)
         {
+            Order = order;
             _sourceStream = sourceStream;
             Count = count;
             PayloadSize = payloadSize;
             RecordSize = recordSize;
         }
+
+        public long Order { get; }
+
+        private string _sourceStream;
+        private bool _multipleSourceStreams;
 
         public long Count { get; set; }
 
