@@ -37,8 +37,8 @@ internal static class OfflineReportStateStore
             var source = existingState?.Source ?? "offline";
 
             var aggregator = new EventAggregator();
-            var chunkFiles = new List<ChunkFileSummary>();
-            DateTime? lastEventTimestampUtc = null;
+            var totalEmptySpaceBytes = existingState?.TotalEmptySpaceBytes ?? 0L;
+            var lastEventTimestampUtc = existingState?.LastEventTimestampUtc;
 
             if (existingState is not null)
             {
@@ -46,9 +46,6 @@ internal static class OfflineReportStateStore
                 {
                     aggregator.AddGroup(group);
                 }
-
-                chunkFiles.AddRange(existingState.ChunkFiles);
-                lastEventTimestampUtc = existingState.LastEventTimestampUtc;
             }
 
             foreach (var group in chunkResult.Groups)
@@ -56,12 +53,7 @@ internal static class OfflineReportStateStore
                 aggregator.AddGroup(group);
             }
 
-            chunkFiles.RemoveAll(summary => string.Equals(summary.ChunkFile, chunkResult.ChunkFileSummary.ChunkFile, StringComparison.Ordinal));
-            chunkFiles.Add(chunkResult.ChunkFileSummary);
-            chunkFiles = chunkFiles
-                .OrderBy(summary => summary.ChunkFile, StringComparer.Ordinal)
-                .ToList();
-
+            totalEmptySpaceBytes += chunkResult.ChunkFileSummary.EmptySpaceBytes;
             lastEventTimestampUtc = MaxTimestamp(lastEventTimestampUtc, chunkResult.LastEventTimestampUtc);
 
             var snapshot = CreateReport(
@@ -69,8 +61,8 @@ internal static class OfflineReportStateStore
                 source,
                 chunkResult.ChunkFileSummary.ChunkFile,
                 lastEventTimestampUtc,
-                chunkFiles,
                 aggregator.Snapshot(),
+                totalEmptySpaceBytes,
                 DateTime.UtcNow);
 
             SaveState(statePath, snapshot);
@@ -119,13 +111,14 @@ internal static class OfflineReportStateStore
         string source,
         string? currentChunk,
         DateTime? lastEventTimestampUtc,
-        IReadOnlyList<ChunkFileSummary> chunkFiles,
         IReadOnlyList<EventGroup> groups,
+        long totalEmptySpaceBytes,
         DateTime completedAtUtc)
     {
         var totalCount = groups.Sum(group => group.TotalCount);
         var totalPayloadSize = groups.Sum(group => group.TotalPayloadSize);
         var totalRecordSize = groups.Sum(group => group.TotalRecordSize);
+        var totalEmptySpaceMb = totalEmptySpaceBytes / 1024d / 1024d;
 
         return new ReportEnvelope(
             generatedAtUtc,
@@ -138,9 +131,11 @@ internal static class OfflineReportStateStore
             totalRecordSize,
             totalRecordSize.ToString("N0", CultureInfo.InvariantCulture),
             totalRecordSize / 1024d / 1024d,
+            totalEmptySpaceBytes,
+            totalEmptySpaceBytes.ToString("N0", CultureInfo.InvariantCulture),
+            totalEmptySpaceMb,
             currentChunk,
             lastEventTimestampUtc,
-            chunkFiles,
             groups);
     }
 

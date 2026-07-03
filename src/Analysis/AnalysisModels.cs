@@ -29,7 +29,10 @@ public sealed record ChunkFileSummary(
     [property: JsonPropertyName("eventPayloadMb")] double EventPayloadMb,
     [property: JsonPropertyName("eventRecordBytes")] long EventRecordBytes,
     [property: JsonPropertyName("eventRecordBytesDisplay")] string EventRecordBytesDisplay,
-    [property: JsonPropertyName("eventRecordMb")] double EventRecordMb);
+    [property: JsonPropertyName("eventRecordMb")] double EventRecordMb,
+    [property: JsonPropertyName("emptySpaceBytes")] long EmptySpaceBytes,
+    [property: JsonPropertyName("emptySpaceBytesDisplay")] string EmptySpaceBytesDisplay,
+    [property: JsonPropertyName("emptySpaceMb")] double EmptySpaceMb);
 
 public sealed record ReportEnvelope(
     [property: JsonPropertyName("generatedAtUtc")] DateTime GeneratedAtUtc,
@@ -42,9 +45,11 @@ public sealed record ReportEnvelope(
     [property: JsonPropertyName("totalRecordSize")] long TotalRecordSize,
     [property: JsonPropertyName("totalRecordSizeDisplay")] string TotalRecordSizeDisplay,
     [property: JsonPropertyName("totalRecordMb")] double TotalRecordMb,
+    [property: JsonPropertyName("totalEmptySpaceBytes")] long TotalEmptySpaceBytes,
+    [property: JsonPropertyName("totalEmptySpaceBytesDisplay")] string TotalEmptySpaceBytesDisplay,
+    [property: JsonPropertyName("totalEmptySpaceMb")] double TotalEmptySpaceMb,
     [property: JsonPropertyName("currentChunk")] string? CurrentChunk,
     [property: JsonPropertyName("lastEventTimestampUtc")] DateTime? LastEventTimestampUtc,
-    [property: JsonPropertyName("chunkFiles")] IReadOnlyList<ChunkFileSummary> ChunkFiles,
     [property: JsonPropertyName("groups")] IReadOnlyList<EventGroup> Groups);
 
 public sealed record ReportOutputOptions(

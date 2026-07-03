@@ -21,10 +21,10 @@ public static class JsonReportWriter
         await writer.FlushAsync();
     }
 
-    public static async Task WriteAsync(ReportEnvelope report, string path, CancellationToken cancellationToken, ReportOutputOptions? outputOptions = null)
+    public static Task WriteAsync(ReportEnvelope report, string path, CancellationToken cancellationToken, ReportOutputOptions? outputOptions = null)
     {
         WriteToFile(report, path, outputOptions);
-        await Task.CompletedTask;
+        return Task.CompletedTask;
     }
 
     public static void WriteToFile(ReportEnvelope report, string path, ReportOutputOptions? outputOptions = null)
@@ -41,19 +41,6 @@ public static class JsonReportWriter
 
     private static ReportEnvelopeOutput ToOutput(ReportEnvelope report, ReportOutputOptions outputOptions)
     {
-        IReadOnlyList<ChunkFileSummaryOutput>? chunkFiles = null;
-        if (outputOptions.IncludeChunkFiles)
-        {
-            chunkFiles = report.ChunkFiles.Select(chunkFile => new ChunkFileSummaryOutput(
-                chunkFile.ChunkFile,
-                chunkFile.SizeBytes.ToString("N0", CultureInfo.InvariantCulture),
-                chunkFile.SizeBytes / 1024d / 1024d,
-                outputOptions.IncludePayloadValues ? chunkFile.EventPayloadBytes.ToString("N0", CultureInfo.InvariantCulture) : null,
-                outputOptions.IncludePayloadValues ? chunkFile.EventPayloadBytes / 1024d / 1024d : null,
-                chunkFile.EventRecordBytes.ToString("N0", CultureInfo.InvariantCulture),
-                chunkFile.EventRecordBytes / 1024d / 1024d)).ToList();
-        }
-
         IReadOnlyList<EventGroupOutput>? groups = null;
         if (outputOptions.IncludeEventGroups)
         {
@@ -79,9 +66,10 @@ public static class JsonReportWriter
             report.TotalRecordSize / 1024d / 1024d,
             outputOptions.IncludePayloadValues ? report.TotalPayloadSize.ToString("N0", CultureInfo.InvariantCulture) : null,
             outputOptions.IncludePayloadValues ? report.TotalPayloadSize / 1024d / 1024d : null,
+            report.TotalEmptySpaceBytes.ToString("N0", CultureInfo.InvariantCulture),
+            report.TotalEmptySpaceMb,
             report.CurrentChunk,
             report.LastEventTimestampUtc,
-            chunkFiles,
             groups);
     }
 
@@ -94,19 +82,11 @@ public static class JsonReportWriter
         [property: JsonPropertyName("totalRecordMb")] double TotalRecordMb,
         [property: JsonPropertyName("totalPayloadSizeDisplay")] string? TotalPayloadSizeDisplay,
         [property: JsonPropertyName("totalPayloadMb")] double? TotalPayloadMb,
+        [property: JsonPropertyName("totalEmptySpaceBytesDisplay")] string TotalEmptySpaceBytesDisplay,
+        [property: JsonPropertyName("totalEmptySpaceMb")] double TotalEmptySpaceMb,
         [property: JsonPropertyName("currentChunk")] string? CurrentChunk,
         [property: JsonPropertyName("lastEventTimestampUtc")] DateTime? LastEventTimestampUtc,
-        [property: JsonPropertyName("chunkFiles")] IReadOnlyList<ChunkFileSummaryOutput>? ChunkFiles,
         [property: JsonPropertyName("groups")] IReadOnlyList<EventGroupOutput>? Groups);
-
-    private sealed record ChunkFileSummaryOutput(
-        [property: JsonPropertyName("chunkFile")] string ChunkFile,
-        [property: JsonPropertyName("sizeBytesDisplay")] string SizeBytesDisplay,
-        [property: JsonPropertyName("sizeMb")] double SizeMb,
-        [property: JsonPropertyName("eventPayloadBytesDisplay")] string? EventPayloadBytesDisplay,
-        [property: JsonPropertyName("eventPayloadMb")] double? EventPayloadMb,
-        [property: JsonPropertyName("eventRecordBytesDisplay")] string EventRecordBytesDisplay,
-        [property: JsonPropertyName("eventRecordMb")] double EventRecordMb);
 
     private sealed record EventGroupOutput(
         [property: JsonPropertyName("EventType")] string EventType,
