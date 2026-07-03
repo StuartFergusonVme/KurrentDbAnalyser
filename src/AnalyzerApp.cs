@@ -8,6 +8,8 @@ namespace ESAnalyser;
 
 public static class AnalyzerApp
 {
+    private static readonly object ConsoleTraceLock = new();
+
     public static async Task<int> RunAsync(string[] args)
     {
         if (args.Length == 0 || IsHelp(args[0]))
@@ -152,7 +154,7 @@ public static class AnalyzerApp
             for (var i = 0; i < chunkFiles.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                results[i] = OfflineDataReader.AnalyzeChunk(chunkFiles[i]);
+                results[i] = AnalyzeChunkWithTrace(chunkFiles[i], cancellationToken);
             }
 
             return results;
@@ -167,10 +169,43 @@ public static class AnalyzerApp
 
         Parallel.ForEach(Enumerable.Range(0, chunkFiles.Length), parallelOptions, index =>
         {
-            results[index] = OfflineDataReader.AnalyzeChunk(chunkFiles[index]);
+            results[index] = AnalyzeChunkWithTrace(chunkFiles[index], cancellationToken);
         });
 
         return results;
+    }
+
+    private static ChunkAnalysisResult AnalyzeChunkWithTrace(string chunkFile, CancellationToken cancellationToken)
+    {
+        var chunkName = Path.GetFileName(chunkFile);
+        var startedAt = DateTimeOffset.Now;
+        TraceChunkEvent("START", chunkName, startedAt, null);
+
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return OfflineDataReader.AnalyzeChunk(chunkFile);
+        }
+        finally
+        {
+            var finishedAt = DateTimeOffset.Now;
+            TraceChunkEvent("FINISH", chunkName, startedAt, finishedAt);
+        }
+    }
+
+    private static void TraceChunkEvent(string phase, string chunkName, DateTimeOffset startedAt, DateTimeOffset? finishedAt)
+    {
+        lock (ConsoleTraceLock)
+        {
+            if (finishedAt is null)
+            {
+                Console.WriteLine($"[{startedAt:O}] {phase} chunk {chunkName}");
+                return;
+            }
+
+            var duration = finishedAt.Value - startedAt;
+            Console.WriteLine($"[{finishedAt:O}] {phase} chunk {chunkName} after {duration.TotalMilliseconds:N0} ms");
+        }
     }
 
     public static async Task WriteLiveReportAsync(string connectionString, TextWriter writer, CancellationToken cancellationToken, ReportOutputOptions outputOptions)
