@@ -26,10 +26,13 @@ internal readonly record struct AsciiStringSlice(int Offset, int Length, string 
 internal static class ChunkRecordParser
 {
     private const int ChunkHeaderSize = 128;
+    private const int OpenRetryCount = 10;
+    private const int OpenRetryDelayMs = 100;
 
     internal static IEnumerable<PhysicalRecord> ReadChunk(string path)
     {
-        using var stream = File.Open(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        // Use shared access so a chunk can still be inspected while the database has it open.
+        using var stream = OpenChunkStream(path);
         if (stream.Length <= ChunkHeaderSize)
         {
             yield break;
@@ -73,6 +76,36 @@ internal static class ChunkRecordParser
                 yield return parsed;
             }
         }
+    }
+
+    private static FileStream OpenChunkStream(string path)
+    {
+        Exception? lastError = null;
+        var delayMs = OpenRetryDelayMs;
+
+        for (var attempt = 1; attempt <= OpenRetryCount; attempt++)
+        {
+            try
+            {
+                return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, bufferSize: 4096, FileOptions.SequentialScan);
+            }
+            catch (IOException ex)
+            {
+                lastError = ex;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                lastError = ex;
+            }
+
+            if (attempt < OpenRetryCount)
+            {
+                Thread.Sleep(delayMs);
+                delayMs = Math.Min(delayMs * 2, 1000);
+            }
+        }
+
+        throw new IOException($"Unable to open chunk file '{path}' after {OpenRetryCount} attempts.", lastError);
     }
 
     private static bool TryParseRecord(ReadOnlySpan<byte> body, out PhysicalRecord parsed)

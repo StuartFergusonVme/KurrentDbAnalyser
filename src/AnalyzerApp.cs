@@ -30,7 +30,10 @@ public static class AnalyzerApp
                     return 1;
                 }
 
-                await WriteOfflineReportAsync(path, Console.Out, CancellationToken.None, outputOptions);
+                var configuration = AppConfiguration.Load();
+                var maxConcurrentChunkFiles = AppConfiguration.GetIntValue(configuration, "OfflineReport:MaxConcurrentChunkFiles", 1);
+
+                await WriteOfflineReportAsync(path, Console.Out, CancellationToken.None, outputOptions, maxConcurrentChunkFiles);
                 return 0;
             }
 
@@ -59,11 +62,45 @@ public static class AnalyzerApp
         }
     }
 
-    public static ReportEnvelope AnalyzeOffline(string dataPath)
+    public static ReportEnvelope AnalyzeOffline(string dataPath) =>
+        AnalyzeOffline(dataPath, 1, CancellationToken.None);
+
+    public static ReportEnvelope AnalyzeOffline(string dataPath, int maxConcurrentChunkFiles) =>
+        AnalyzeOffline(dataPath, maxConcurrentChunkFiles, CancellationToken.None);
+
+    public static ReportEnvelope AnalyzeOffline(string dataPath, int maxConcurrentChunkFiles, CancellationToken cancellationToken)
     {
         var generatedAtUtc = DateTime.UtcNow;
-        var records = OfflineDataReader.Read(dataPath);
-        return BuildReport("offline", records, generatedAtUtc);
+        var chunkFiles = ChunkDirectoryScanner.EnumerateChunkFiles(dataPath).ToArray();
+
+        if (chunkFiles.Length == 0)
+        {
+            return CreateReport("offline", Array.Empty<EventGroup>(), null, null, Array.Empty<ChunkFileSummary>(), generatedAtUtc);
+        }
+
+        var chunkResults = AnalyzeChunkFiles(chunkFiles, maxConcurrentChunkFiles, cancellationToken);
+        var aggregator = new EventAggregator();
+        var chunkFileSummaries = new List<ChunkFileSummary>(chunkResults.Length);
+        string? currentChunk = null;
+        DateTime? lastEventTimestampUtc = null;
+
+        foreach (var result in chunkResults)
+        {
+            currentChunk = result.ChunkFileSummary.ChunkFile;
+            chunkFileSummaries.Add(result.ChunkFileSummary);
+
+            if (result.LastEventTimestampUtc.HasValue)
+            {
+                lastEventTimestampUtc = result.LastEventTimestampUtc;
+            }
+
+            foreach (var group in result.Groups)
+            {
+                aggregator.AddGroup(group);
+            }
+        }
+
+        return CreateReport("offline", aggregator.Snapshot(), currentChunk, lastEventTimestampUtc, chunkFileSummaries, generatedAtUtc);
     }
 
     public static async Task<ReportEnvelope> AnalyzeLiveAsync(string connectionString, CancellationToken cancellationToken)
@@ -75,63 +112,65 @@ public static class AnalyzerApp
 
     public static async Task WriteOfflineReportAsync(string dataPath, TextWriter writer, CancellationToken cancellationToken)
     {
-        var report = AnalyzeOffline(dataPath);
-        await JsonReportWriter.WriteAsync(report, writer, cancellationToken, new ReportOutputOptions(false, true, false));
+        await WriteOfflineReportAsync(dataPath, writer, cancellationToken, new ReportOutputOptions(false, true, false));
     }
 
     public static async Task WriteOfflineReportAsync(string dataPath, TextWriter writer, CancellationToken cancellationToken, ReportOutputOptions outputOptions)
     {
-        var report = AnalyzeOffline(dataPath);
+        await WriteOfflineReportAsync(dataPath, writer, cancellationToken, outputOptions, 1);
+    }
+
+    public static async Task WriteOfflineReportAsync(string dataPath, TextWriter writer, CancellationToken cancellationToken, ReportOutputOptions outputOptions, int maxConcurrentChunkFiles)
+    {
+        var report = AnalyzeOffline(dataPath, maxConcurrentChunkFiles, cancellationToken);
         await JsonReportWriter.WriteAsync(report, writer, cancellationToken, outputOptions);
     }
 
     public static async Task WriteOfflineReportAsync(string dataPath, string outputPath, CancellationToken cancellationToken, ReportOutputOptions? outputOptions = null)
     {
-        var generatedAtUtc = DateTime.UtcNow;
-        Console.WriteLine("Scanning chunk files...");
-        var chunkFiles = ChunkDirectoryScanner.EnumerateChunkFiles(dataPath).ToArray();
-        var aggregator = new EventAggregator();
-        var chunkFileSummaries = new List<ChunkFileSummary>(chunkFiles.Length);
+        await WriteOfflineReportAsync(dataPath, outputPath, cancellationToken, outputOptions, 1);
+    }
+
+    public static async Task WriteOfflineReportAsync(string dataPath, string outputPath, CancellationToken cancellationToken, ReportOutputOptions? outputOptions, int maxConcurrentChunkFiles)
+    {
+        var report = AnalyzeOffline(dataPath, maxConcurrentChunkFiles, cancellationToken);
+        await JsonReportWriter.WriteAsync(report, outputPath, cancellationToken, outputOptions ?? new ReportOutputOptions(false, true, false));
+    }
+
+    private static ChunkAnalysisResult[] AnalyzeChunkFiles(string[] chunkFiles, int maxConcurrentChunkFiles, CancellationToken cancellationToken)
+    {
+        maxConcurrentChunkFiles = Math.Max(1, maxConcurrentChunkFiles);
+        var results = new ChunkAnalysisResult[chunkFiles.Length];
 
         if (chunkFiles.Length == 0)
         {
-            await JsonReportWriter.WriteAsync(CreateReport("offline", Array.Empty<EventGroup>(), null, null, Array.Empty<ChunkFileSummary>(), generatedAtUtc), outputPath, cancellationToken, outputOptions ?? new ReportOutputOptions(false, true, false));
-            return;
+            return results;
         }
 
-        var currentChunk = string.Empty;
-        DateTime? lastEventTimestampUtc = null;
-
-        foreach (var chunkFile in chunkFiles)
+        if (maxConcurrentChunkFiles == 1 || chunkFiles.Length == 1)
         {
-            Console.WriteLine($"Processing chunk: {Path.GetFileName(chunkFile)}");
-            currentChunk = Path.GetFileName(chunkFile);
-            var chunkEventPayloadBytes = 0L;
-            var chunkEventRecordBytes = 0L;
-            foreach (var record in OfflineDataReader.ReadLogicalRecordsWithTimestamps(new[] { chunkFile }))
+            for (var i = 0; i < chunkFiles.Length; i++)
             {
-                aggregator.Add(record.Record);
-                lastEventTimestampUtc = record.TimestampUtc;
-                chunkEventPayloadBytes += record.Record.PayloadSize;
-                chunkEventRecordBytes += record.Record.RecordSize;
+                cancellationToken.ThrowIfCancellationRequested();
+                results[i] = OfflineDataReader.AnalyzeChunk(chunkFiles[i]);
             }
 
-            var chunkSizeBytes = new FileInfo(chunkFile).Length;
-            chunkFileSummaries.Add(new ChunkFileSummary(
-                currentChunk,
-                chunkSizeBytes,
-                chunkSizeBytes.ToString("N0", CultureInfo.InvariantCulture),
-                chunkSizeBytes / 1024d / 1024d,
-                chunkEventPayloadBytes,
-                chunkEventPayloadBytes.ToString("N0", CultureInfo.InvariantCulture),
-                chunkEventPayloadBytes / 1024d / 1024d,
-                chunkEventRecordBytes,
-                chunkEventRecordBytes.ToString("N0", CultureInfo.InvariantCulture),
-                chunkEventRecordBytes / 1024d / 1024d));
-
-            var report = CreateReport("offline", aggregator.Snapshot(), currentChunk, lastEventTimestampUtc, chunkFileSummaries, generatedAtUtc);
-            await JsonReportWriter.WriteAsync(report, outputPath, cancellationToken, outputOptions ?? new ReportOutputOptions(false, true, false));
+            return results;
         }
+
+        // Analyze each chunk independently, then merge the ordered results after all workers finish.
+        var parallelOptions = new ParallelOptions
+        {
+            MaxDegreeOfParallelism = maxConcurrentChunkFiles,
+            CancellationToken = cancellationToken
+        };
+
+        Parallel.ForEach(Enumerable.Range(0, chunkFiles.Length), parallelOptions, index =>
+        {
+            results[index] = OfflineDataReader.AnalyzeChunk(chunkFiles[index]);
+        });
+
+        return results;
     }
 
     public static async Task WriteLiveReportAsync(string connectionString, TextWriter writer, CancellationToken cancellationToken, ReportOutputOptions outputOptions)

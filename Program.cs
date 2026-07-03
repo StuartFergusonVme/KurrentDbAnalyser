@@ -7,10 +7,16 @@ if (args.Length > 0)
     return;
 }
 
-var dataPath = @"C:\visualbos2\Eposity\ESDB\data";
-var outputPath = Path.Combine("c:\\temp", "es-analysis-report.json");
+var configuration = AppConfiguration.Load();
+var dataPath = AppConfiguration.GetRequiredValue(configuration, "OfflineReport:DataPath");
+var outputPath = AppConfiguration.GetRequiredValue(configuration, "OfflineReport:OutputPath");
+var maxConcurrentChunkFiles = AppConfiguration.GetIntValue(configuration, "OfflineReport:MaxConcurrentChunkFiles", 1);
 
-ReportOutputOptions options = new ReportOutputOptions(false, true, false);
-await AnalyzerApp.WriteOfflineReportAsync(dataPath, outputPath, CancellationToken.None, options);
+var options = new ReportOutputOptions(
+    IncludePayloadValues: AppConfiguration.GetBoolValue(configuration, "OfflineReport:OutputOptions:IncludePayloadValues", false),
+    IncludeEventGroups: AppConfiguration.GetBoolValue(configuration, "OfflineReport:OutputOptions:IncludeEventGroups", true),
+    IncludeChunkFiles: AppConfiguration.GetBoolValue(configuration, "OfflineReport:OutputOptions:IncludeChunkFiles", false));
+
+await AnalyzerApp.WriteOfflineReportAsync(dataPath, outputPath, CancellationToken.None, options, maxConcurrentChunkFiles);
 System.Console.WriteLine($"Report written to {outputPath}");
 Console.ReadKey();

@@ -1,8 +1,16 @@
+using ESAnalyser.Analysis;
 using AnalysisEventRecord = ESAnalyser.Analysis.EventRecord;
+using System.Globalization;
 
 namespace ESAnalyser.Offline;
 
 internal sealed record LogicalAnalysisRecord(AnalysisEventRecord Record, DateTime TimestampUtc);
+
+internal sealed record ChunkAnalysisResult(
+    string ChunkFile,
+    ChunkFileSummary ChunkFileSummary,
+    IReadOnlyList<EventGroup> Groups,
+    DateTime? LastEventTimestampUtc);
 
 public static class OfflineDataReader
 {
@@ -33,6 +41,38 @@ public static class OfflineDataReader
         }
 
         return sourceEventTypes;
+    }
+
+    internal static ChunkAnalysisResult AnalyzeChunk(string chunkFile)
+    {
+        var chunkFileName = Path.GetFileName(chunkFile);
+        var chunkEventPayloadBytes = 0L;
+        var chunkEventRecordBytes = 0L;
+        DateTime? lastEventTimestampUtc = null;
+        var aggregator = new EventAggregator();
+
+        foreach (var record in ReadLogicalRecordsWithTimestamps(new[] { chunkFile }))
+        {
+            aggregator.Add(record.Record);
+            lastEventTimestampUtc = record.TimestampUtc;
+            chunkEventPayloadBytes += record.Record.PayloadSize;
+            chunkEventRecordBytes += record.Record.RecordSize;
+        }
+
+        var chunkSizeBytes = new FileInfo(chunkFile).Length;
+        var summary = new ChunkFileSummary(
+            chunkFileName,
+            chunkSizeBytes,
+            chunkSizeBytes.ToString("N0", CultureInfo.InvariantCulture),
+            chunkSizeBytes / 1024d / 1024d,
+            chunkEventPayloadBytes,
+            chunkEventPayloadBytes.ToString("N0", CultureInfo.InvariantCulture),
+            chunkEventPayloadBytes / 1024d / 1024d,
+            chunkEventRecordBytes,
+            chunkEventRecordBytes.ToString("N0", CultureInfo.InvariantCulture),
+            chunkEventRecordBytes / 1024d / 1024d);
+
+        return new ChunkAnalysisResult(chunkFile, summary, aggregator.Snapshot(), lastEventTimestampUtc);
     }
 
     internal static IEnumerable<AnalysisEventRecord> ReadLogicalRecords(
