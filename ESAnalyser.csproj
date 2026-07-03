@@ -1,0 +1,60 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>ESAnalyser</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="KurrentDB.Client">
+      <HintPath>$(USERPROFILE)\.nuget\packages\kurrentdb.client\1.4.0\lib\net8.0\KurrentDB.Client.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Grpc.Core.Api">
+      <HintPath>$(USERPROFILE)\.nuget\packages\grpc.core.api\2.80.0\lib\netstandard2.0\Grpc.Core.Api.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Grpc.Net.Client">
+      <HintPath>$(USERPROFILE)\.nuget\packages\grpc.net.client\2.80.0\lib\netstandard2.1\Grpc.Net.Client.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Grpc.Net.Common">
+      <HintPath>$(USERPROFILE)\.nuget\packages\grpc.net.common\2.80.0\lib\netstandard2.1\Grpc.Net.Common.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Grpc.StatusProto">
+      <HintPath>$(USERPROFILE)\.nuget\packages\grpc.statusproto\2.71.0\lib\netstandard2.0\Grpc.StatusProto.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Google.Protobuf">
+      <HintPath>$(USERPROFILE)\.nuget\packages\google.protobuf\3.33.1\lib\netstandard2.0\Google.Protobuf.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Logging.Abstractions">
+      <HintPath>$(USERPROFILE)\.nuget\packages\microsoft.extensions.logging.abstractions\10.0.0\lib\net10.0\Microsoft.Extensions.Logging.Abstractions.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Logging">
+      <HintPath>$(USERPROFILE)\.nuget\packages\microsoft.extensions.logging\10.0.0\lib\net10.0\Microsoft.Extensions.Logging.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="Microsoft.Extensions.Options">
+      <HintPath>$(USERPROFILE)\.nuget\packages\microsoft.extensions.options\10.0.0\lib\net10.0\Microsoft.Extensions.Options.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="OpenTelemetry.Api">
+      <HintPath>$(USERPROFILE)\.nuget\packages\opentelemetry.api\1.15.3\lib\net8.0\OpenTelemetry.Api.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Diagnostics.DiagnosticSource">
+      <HintPath>$(USERPROFILE)\.nuget\packages\system.diagnostics.diagnosticsource\10.0.0\lib\net10.0\System.Diagnostics.DiagnosticSource.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="System.Linq.AsyncEnumerable">
+      <HintPath>$(USERPROFILE)\.nuget\packages\system.linq.asyncenumerable\10.0.5\lib\net10.0\System.Linq.AsyncEnumerable.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>
