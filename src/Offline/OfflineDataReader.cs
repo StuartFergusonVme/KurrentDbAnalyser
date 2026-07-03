@@ -6,7 +6,7 @@ namespace ESAnalyser.Offline;
 
 internal sealed record LogicalAnalysisRecord(AnalysisEventRecord Record, DateTime TimestampUtc);
 
-internal sealed record ChunkAnalysisResult(
+public sealed record ChunkAnalysisResult(
     string ChunkFile,
     ChunkFileSummary ChunkFileSummary,
     IReadOnlyList<EventGroup> Groups,

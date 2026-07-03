@@ -23,6 +23,12 @@ public static class JsonReportWriter
 
     public static async Task WriteAsync(ReportEnvelope report, string path, CancellationToken cancellationToken, ReportOutputOptions? outputOptions = null)
     {
+        WriteToFile(report, path, outputOptions);
+        await Task.CompletedTask;
+    }
+
+    public static void WriteToFile(ReportEnvelope report, string path, ReportOutputOptions? outputOptions = null)
+    {
         var json = JsonSerializer.Serialize(ToOutput(report, outputOptions ?? new ReportOutputOptions(false, true, false)), Options);
         var directory = Path.GetDirectoryName(Path.GetFullPath(path));
         if (!string.IsNullOrWhiteSpace(directory))
@@ -30,10 +36,7 @@ public static class JsonReportWriter
             Directory.CreateDirectory(directory);
         }
 
-        await using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, FileOptions.SequentialScan);
-        await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
-        await writer.WriteAsync(json.AsMemory(), cancellationToken);
-        await writer.FlushAsync(cancellationToken);
+        File.WriteAllText(path, json, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
     }
 
     private static ReportEnvelopeOutput ToOutput(ReportEnvelope report, ReportOutputOptions outputOptions)

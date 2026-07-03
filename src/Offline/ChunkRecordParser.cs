@@ -134,7 +134,7 @@ internal static class ChunkRecordParser
             return false;
         }
 
-        var flags = BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(offset, sizeof(ushort)));
+        _ = BinaryPrimitives.ReadUInt16LittleEndian(body.Slice(offset, sizeof(ushort)));
         offset += sizeof(ushort);
         _ = BinaryPrimitives.ReadInt64LittleEndian(body.Slice(offset, sizeof(long)));
         offset += sizeof(long);
@@ -219,7 +219,7 @@ internal static class ChunkRecordParser
         }
 
         var payloadSize = dataLength + metadataLength;
-        var isLinked = (flags & 0x01) != 0 || streamName.StartsWith("$ce-", StringComparison.Ordinal) || streamName.StartsWith("$et-", StringComparison.Ordinal) || eventType == "$>";
+        var isLinked = streamName.StartsWith("$ce-", StringComparison.Ordinal) || streamName.StartsWith("$et-", StringComparison.Ordinal) || eventType == "$>";
         string? linkTargetStream = null;
         int? linkTargetEventNumber = null;
 

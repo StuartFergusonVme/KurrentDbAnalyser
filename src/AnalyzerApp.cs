@@ -70,7 +70,7 @@ public static class AnalyzerApp
     public static ReportEnvelope AnalyzeOffline(string dataPath, int maxConcurrentChunkFiles) =>
         AnalyzeOffline(dataPath, maxConcurrentChunkFiles, CancellationToken.None);
 
-    public static ReportEnvelope AnalyzeOffline(string dataPath, int maxConcurrentChunkFiles, CancellationToken cancellationToken)
+    public static ReportEnvelope AnalyzeOffline(string dataPath, int maxConcurrentChunkFiles, CancellationToken cancellationToken, Action<ChunkAnalysisResult>? chunkCompleted = null)
     {
         var generatedAtUtc = DateTime.UtcNow;
         var chunkFiles = ChunkDirectoryScanner.EnumerateChunkFiles(dataPath).ToArray();
@@ -80,7 +80,7 @@ public static class AnalyzerApp
             return CreateReport("offline", Array.Empty<EventGroup>(), null, null, Array.Empty<ChunkFileSummary>(), generatedAtUtc);
         }
 
-        var chunkResults = AnalyzeChunkFiles(chunkFiles, maxConcurrentChunkFiles, cancellationToken);
+        var chunkResults = AnalyzeChunkFiles(chunkFiles, maxConcurrentChunkFiles, cancellationToken, chunkCompleted);
         var aggregator = new EventAggregator();
         var chunkFileSummaries = new List<ChunkFileSummary>(chunkResults.Length);
         string? currentChunk = null;
@@ -93,7 +93,9 @@ public static class AnalyzerApp
 
             if (result.LastEventTimestampUtc.HasValue)
             {
-                lastEventTimestampUtc = result.LastEventTimestampUtc;
+                lastEventTimestampUtc = lastEventTimestampUtc.HasValue
+                    ? (lastEventTimestampUtc.Value > result.LastEventTimestampUtc.Value ? lastEventTimestampUtc : result.LastEventTimestampUtc)
+                    : result.LastEventTimestampUtc;
             }
 
             foreach (var group in result.Groups)
@@ -135,11 +137,18 @@ public static class AnalyzerApp
 
     public static async Task WriteOfflineReportAsync(string dataPath, string outputPath, CancellationToken cancellationToken, ReportOutputOptions? outputOptions, int maxConcurrentChunkFiles)
     {
-        var report = AnalyzeOffline(dataPath, maxConcurrentChunkFiles, cancellationToken);
-        await JsonReportWriter.WriteAsync(report, outputPath, cancellationToken, outputOptions ?? new ReportOutputOptions(false, true, false));
+        var actualOutputOptions = outputOptions ?? new ReportOutputOptions(false, true, false);
+        var statePath = OfflineReportStateStore.GetStatePath(outputPath);
+        var report = AnalyzeOffline(
+            dataPath,
+            maxConcurrentChunkFiles,
+            cancellationToken,
+            chunkResult => OfflineReportStateStore.MergeChunkAndPublish(statePath, outputPath, chunkResult, cancellationToken, actualOutputOptions));
+        var finalReport = OfflineReportStateStore.LoadSnapshot(statePath) ?? report;
+        await JsonReportWriter.WriteAsync(finalReport, outputPath, cancellationToken, actualOutputOptions);
     }
 
-    private static ChunkAnalysisResult[] AnalyzeChunkFiles(string[] chunkFiles, int maxConcurrentChunkFiles, CancellationToken cancellationToken)
+    private static ChunkAnalysisResult[] AnalyzeChunkFiles(string[] chunkFiles, int maxConcurrentChunkFiles, CancellationToken cancellationToken, Action<ChunkAnalysisResult>? chunkCompleted = null)
     {
         maxConcurrentChunkFiles = Math.Max(1, maxConcurrentChunkFiles);
         var results = new ChunkAnalysisResult[chunkFiles.Length];
@@ -155,6 +164,7 @@ public static class AnalyzerApp
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 results[i] = AnalyzeChunkWithTrace(chunkFiles[i], cancellationToken);
+                chunkCompleted?.Invoke(results[i]);
             }
 
             return results;
@@ -170,6 +180,7 @@ public static class AnalyzerApp
         Parallel.ForEach(Enumerable.Range(0, chunkFiles.Length), parallelOptions, index =>
         {
             results[index] = AnalyzeChunkWithTrace(chunkFiles[index], cancellationToken);
+            chunkCompleted?.Invoke(results[index]);
         });
 
         return results;
