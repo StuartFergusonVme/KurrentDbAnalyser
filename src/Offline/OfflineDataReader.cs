@@ -70,7 +70,10 @@ public static class OfflineDataReader
             chunkEventPayloadBytes / 1024d / 1024d,
             chunkEventRecordBytes,
             chunkEventRecordBytes.ToString("N0", CultureInfo.InvariantCulture),
-            chunkEventRecordBytes / 1024d / 1024d);
+            chunkEventRecordBytes / 1024d / 1024d,
+            Math.Max(0, chunkSizeBytes - chunkEventRecordBytes),
+            Math.Max(0, chunkSizeBytes - chunkEventRecordBytes).ToString("N0", CultureInfo.InvariantCulture),
+            Math.Max(0, chunkSizeBytes - chunkEventRecordBytes) / 1024d / 1024d);
 
         return new ChunkAnalysisResult(chunkFile, summary, aggregator.Snapshot(), lastEventTimestampUtc);
     }

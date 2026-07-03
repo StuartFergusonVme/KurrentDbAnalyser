@@ -1,5 +1,7 @@
 using ESAnalyser;
 using ESAnalyser.Analysis;
+using System.Globalization;
+using System.Text;
 
 if (args.Length > 0)
 {
@@ -10,6 +12,7 @@ if (args.Length > 0)
 var configuration = AppConfiguration.Load();
 var dataPath = AppConfiguration.GetRequiredValue(configuration, "OfflineReport:DataPath");
 var outputPath = AppConfiguration.GetRequiredValue(configuration, "OfflineReport:OutputPath");
+outputPath = MakeTimestampedReportPath(outputPath);
 var maxConcurrentChunkFiles = AppConfiguration.GetIntValue(configuration, "OfflineReport:MaxConcurrentChunkFiles", 1);
 
 var options = new ReportOutputOptions(
@@ -20,3 +23,19 @@ var options = new ReportOutputOptions(
 await AnalyzerApp.WriteOfflineReportAsync(dataPath, outputPath, CancellationToken.None, options, maxConcurrentChunkFiles);
 System.Console.WriteLine($"Report written to {outputPath}");
 Console.ReadKey();
+
+static string MakeTimestampedReportPath(string outputPath)
+{
+    var directory = Path.GetDirectoryName(outputPath);
+    var fileName = Path.GetFileName(outputPath);
+    var extension = Path.GetExtension(fileName);
+    var nameWithoutExtension = Path.GetFileNameWithoutExtension(fileName);
+    var timestamp = DateTime.UtcNow.ToString("yyyyMMddHHmmssfff", CultureInfo.InvariantCulture);
+    var uniqueFileName = string.IsNullOrWhiteSpace(extension)
+        ? $"{nameWithoutExtension}.{timestamp}"
+        : $"{nameWithoutExtension}.{timestamp}{extension}";
+
+    return string.IsNullOrWhiteSpace(directory)
+        ? uniqueFileName
+        : Path.Combine(directory, uniqueFileName);
+}

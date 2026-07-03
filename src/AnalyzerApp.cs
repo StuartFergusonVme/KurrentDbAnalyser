@@ -77,19 +77,19 @@ public static class AnalyzerApp
 
         if (chunkFiles.Length == 0)
         {
-            return CreateReport("offline", Array.Empty<EventGroup>(), null, null, Array.Empty<ChunkFileSummary>(), generatedAtUtc);
+            return CreateReport("offline", Array.Empty<EventGroup>(), null, null, 0, generatedAtUtc);
         }
 
         var chunkResults = AnalyzeChunkFiles(chunkFiles, maxConcurrentChunkFiles, cancellationToken, chunkCompleted);
         var aggregator = new EventAggregator();
-        var chunkFileSummaries = new List<ChunkFileSummary>(chunkResults.Length);
         string? currentChunk = null;
         DateTime? lastEventTimestampUtc = null;
+        long totalEmptySpaceBytes = 0;
 
         foreach (var result in chunkResults)
         {
             currentChunk = result.ChunkFileSummary.ChunkFile;
-            chunkFileSummaries.Add(result.ChunkFileSummary);
+            totalEmptySpaceBytes += result.ChunkFileSummary.EmptySpaceBytes;
 
             if (result.LastEventTimestampUtc.HasValue)
             {
@@ -104,7 +104,7 @@ public static class AnalyzerApp
             }
         }
 
-        return CreateReport("offline", aggregator.Snapshot(), currentChunk, lastEventTimestampUtc, chunkFileSummaries, generatedAtUtc);
+        return CreateReport("offline", aggregator.Snapshot(), currentChunk, lastEventTimestampUtc, totalEmptySpaceBytes, generatedAtUtc);
     }
 
     public static async Task<ReportEnvelope> AnalyzeLiveAsync(string connectionString, CancellationToken cancellationToken)
@@ -233,14 +233,15 @@ public static class AnalyzerApp
             aggregator.Add(record);
         }
 
-        return CreateReport(source, aggregator.Snapshot(), null, null, Array.Empty<ChunkFileSummary>(), generatedAtUtc);
+        return CreateReport(source, aggregator.Snapshot(), null, null, 0, generatedAtUtc);
     }
 
-    private static ReportEnvelope CreateReport(string source, IReadOnlyList<EventGroup> groups, string? currentChunk, DateTime? lastEventTimestampUtc, IReadOnlyList<ChunkFileSummary> chunkFiles, DateTime generatedAtUtc)
+    private static ReportEnvelope CreateReport(string source, IReadOnlyList<EventGroup> groups, string? currentChunk, DateTime? lastEventTimestampUtc, long totalEmptySpaceBytes, DateTime generatedAtUtc)
     {
         var totalCount = groups.Sum(group => group.TotalCount);
         var totalPayloadSize = groups.Sum(group => group.TotalPayloadSize);
         var totalRecordSize = groups.Sum(group => group.TotalRecordSize);
+        var totalEmptySpaceMb = totalEmptySpaceBytes / 1024d / 1024d;
         var completedAtUtc = DateTime.UtcNow;
         return new ReportEnvelope(
             generatedAtUtc,
@@ -253,9 +254,11 @@ public static class AnalyzerApp
             totalRecordSize,
             totalRecordSize.ToString("N0", CultureInfo.InvariantCulture),
             totalRecordSize / 1024d / 1024d,
+            totalEmptySpaceBytes,
+            totalEmptySpaceBytes.ToString("N0", CultureInfo.InvariantCulture),
+            totalEmptySpaceMb,
             currentChunk,
             lastEventTimestampUtc,
-            chunkFiles,
             groups);
     }
 

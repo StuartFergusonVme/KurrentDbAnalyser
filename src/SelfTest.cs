@@ -70,12 +70,11 @@ public static class SelfTest
             40,
             40.ToString("N0", CultureInfo.InvariantCulture),
             40 / 1024d / 1024d,
+            60,
+            60.ToString("N0", CultureInfo.InvariantCulture),
+            60 / 1024d / 1024d,
             null,
             null,
-            new[]
-            {
-                new ChunkFileSummary("chunk-1", 100, "100", 100 / 1024d / 1024d, 20, "20", 20 / 1024d / 1024d, 30, "30", 30 / 1024d / 1024d)
-            },
             new[]
             {
                 new EventGroup("Alpha", "stream-a", false, 2, 24, 12, 40, 20)
@@ -84,7 +83,7 @@ public static class SelfTest
         using var minimalWriter = new StringWriter();
         JsonReportWriter.WriteAsync(report, minimalWriter, CancellationToken.None, new ReportOutputOptions(false, false, false)).GetAwaiter().GetResult();
         var minimalJson = minimalWriter.ToString();
-        if (!minimalJson.Contains("completedAtUtc") || minimalJson.Contains("totalPayloadSize") || minimalJson.Contains("groups") || minimalJson.Contains("chunkFiles") || minimalJson.Contains("eventPayloadBytesDisplay"))
+        if (!minimalJson.Contains("completedAtUtc") || !minimalJson.Contains("totalEmptySpaceBytesDisplay") || minimalJson.Contains("totalPayloadSize") || minimalJson.Contains("groups") || minimalJson.Contains("chunkFiles") || minimalJson.Contains("eventPayloadBytesDisplay"))
         {
             throw new InvalidOperationException("Minimal output shape check failed.");
         }
@@ -92,7 +91,7 @@ public static class SelfTest
         using var defaultWriter = new StringWriter();
         JsonReportWriter.WriteAsync(report, defaultWriter, CancellationToken.None).GetAwaiter().GetResult();
         var defaultJson = defaultWriter.ToString();
-        if (!defaultJson.Contains("groups") || defaultJson.Contains("chunkFiles"))
+        if (!defaultJson.Contains("groups") || !defaultJson.Contains("totalEmptySpaceBytesDisplay") || defaultJson.Contains("chunkFiles"))
         {
             throw new InvalidOperationException("Default output shape check failed.");
         }
@@ -100,7 +99,7 @@ public static class SelfTest
         using var verboseWriter = new StringWriter();
         JsonReportWriter.WriteAsync(report, verboseWriter, CancellationToken.None, new ReportOutputOptions(true, true, true)).GetAwaiter().GetResult();
         var verboseJson = verboseWriter.ToString();
-        if (!verboseJson.Contains("completedAtUtc") || !verboseJson.Contains("totalPayloadSizeDisplay") || !verboseJson.Contains("groups") || !verboseJson.Contains("chunkFiles") || !verboseJson.Contains("eventPayloadBytesDisplay"))
+        if (!verboseJson.Contains("completedAtUtc") || !verboseJson.Contains("totalPayloadSizeDisplay") || !verboseJson.Contains("groups") || !verboseJson.Contains("totalEmptySpaceBytesDisplay") || verboseJson.Contains("chunkFiles"))
         {
             throw new InvalidOperationException("Verbose output shape check failed.");
         }
