@@ -22,6 +22,21 @@ public sealed class EventAggregator
         _groups[key] = new GroupState(record.SourceStream, 1, record.PayloadSize, record.RecordSize);
     }
 
+    public void AddGroup(EventGroup group)
+    {
+        var key = (group.EventType, group.IsLinkedEvent);
+        if (_groups.TryGetValue(key, out var current))
+        {
+            current.Count += group.TotalCount;
+            current.PayloadSize += group.TotalPayloadSize;
+            current.RecordSize += group.TotalRecordSize;
+            current.UpdateSourceStream(group.SourceStream);
+            return;
+        }
+
+        _groups[key] = new GroupState(group.SourceStream, group.TotalCount, group.TotalPayloadSize, group.TotalRecordSize);
+    }
+
     public IReadOnlyList<EventGroup> Snapshot() =>
         _groups
             .Select(pair => new EventGroup(

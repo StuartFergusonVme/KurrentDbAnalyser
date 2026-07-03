@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using ESAnalyser.Analysis;
 using System.Globalization;
+using System.Text;
 
 namespace ESAnalyser.Output;
 
@@ -29,7 +30,10 @@ public static class JsonReportWriter
             Directory.CreateDirectory(directory);
         }
 
-        await File.WriteAllTextAsync(path, json, cancellationToken);
+        await using var stream = new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 4096, FileOptions.SequentialScan);
+        await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
+        await writer.WriteAsync(json.AsMemory(), cancellationToken);
+        await writer.FlushAsync(cancellationToken);
     }
 
     private static ReportEnvelopeOutput ToOutput(ReportEnvelope report, ReportOutputOptions outputOptions)
