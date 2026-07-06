@@ -111,8 +111,8 @@ public static class SelfTest
             throw new InvalidOperationException("Chunk discovery progress formatting check failed.");
         }
 
-        var progressLine = ChunkProgressFormatter.FormatProgressMessage(5, 10, TimeSpan.FromSeconds(2), "chunk-000005");
-        if (!progressLine.Contains("50.0%", StringComparison.Ordinal) || !progressLine.Contains("2.5 chunk files/sec", StringComparison.Ordinal) || !progressLine.Contains("chunk-000005", StringComparison.Ordinal))
+        var progressLine = ChunkProgressFormatter.FormatProgressMessage(5, 10, TimeSpan.FromSeconds(2), "chunk-000005", DateTime.UnixEpoch, DateTime.UnixEpoch.AddSeconds(2));
+        if (!progressLine.Contains("50.0%", StringComparison.Ordinal) || !progressLine.Contains("2.5 chunk files/sec", StringComparison.Ordinal) || !progressLine.Contains("chunk-000005", StringComparison.Ordinal) || !progressLine.Contains("start=1970-01-01T00:00:00.0000000Z", StringComparison.Ordinal) || !progressLine.Contains("end=1970-01-01T00:00:02.0000000Z", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Chunk progress formatting check failed.");
         }
@@ -126,6 +126,80 @@ public static class SelfTest
             if (emptyReport.TotalCount != 0 || !statusWriter.ToString().Contains("No chunk files found in", StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("Offline chunk discovery integration check failed.");
+            }
+
+            static ChunkAnalysisResult CreateStubChunkResult(string chunkFile) =>
+                new(
+                    chunkFile,
+                    new ChunkFileSummary(chunkFile, 0, "0", 0, 0, "0", 0, 0, "0", 0, 0, "0", 0),
+                    Array.Empty<EventGroup>(),
+                    null)
+                {
+                    StartedAtUtc = DateTime.UnixEpoch,
+                    CompletedAtUtc = DateTime.UnixEpoch.AddSeconds(1)
+                };
+
+            var orderedChunkFiles = new[]
+            {
+                Path.Combine(tempDirectory, "chunk-000000"),
+                Path.Combine(tempDirectory, "chunk-000001"),
+                Path.Combine(tempDirectory, "chunk-000002")
+            };
+
+            ThreadPool.GetMinThreads(out var originalWorkerThreads, out var originalCompletionThreads);
+            var originalMinWorkerThreads = originalWorkerThreads;
+            ThreadPool.SetMinThreads(Math.Max(originalMinWorkerThreads, 4), originalCompletionThreads);
+
+            using var gateZero = new ManualResetEventSlim(false);
+            using var gateOne = new ManualResetEventSlim(false);
+            var callbackOrder = new string[orderedChunkFiles.Length];
+            var callbackCount = 0;
+
+            var gateReleaseTask = Task.Run(async () =>
+            {
+                await Task.Delay(50);
+                gateOne.Set();
+                await Task.Delay(50);
+                gateZero.Set();
+            });
+
+            try
+            {
+                var orderedResults = AnalyzerApp.AnalyzeChunkFiles(
+                    orderedChunkFiles,
+                    3,
+                    CancellationToken.None,
+                    result =>
+                    {
+                        var index = Interlocked.Increment(ref callbackCount) - 1;
+                        callbackOrder[index] = result.ChunkFileSummary.ChunkFile;
+                    },
+                    (chunkFile, _) =>
+                    {
+                        var fileName = Path.GetFileName(chunkFile);
+                        if (fileName == "chunk-000000")
+                        {
+                            gateZero.Wait();
+                        }
+                        else if (fileName == "chunk-000001")
+                        {
+                            gateOne.Wait();
+                        }
+
+                        return CreateStubChunkResult(chunkFile);
+                    });
+
+                if (callbackCount != orderedChunkFiles.Length || !orderedChunkFiles.SequenceEqual(callbackOrder) || !orderedChunkFiles.SequenceEqual(orderedResults.Select(result => result.ChunkFile)))
+                {
+                    throw new InvalidOperationException("Ordered chunk completion check failed.");
+                }
+            }
+            finally
+            {
+                gateZero.Set();
+                gateOne.Set();
+                gateReleaseTask.GetAwaiter().GetResult();
+                ThreadPool.SetMinThreads(originalMinWorkerThreads, originalCompletionThreads);
             }
         }
         finally

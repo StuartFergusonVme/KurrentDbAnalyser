@@ -10,7 +10,12 @@ public sealed record ChunkAnalysisResult(
     string ChunkFile,
     ChunkFileSummary ChunkFileSummary,
     IReadOnlyList<EventGroup> Groups,
-    DateTime? LastEventTimestampUtc);
+    DateTime? LastEventTimestampUtc)
+{
+    public required DateTime StartedAtUtc { get; init; }
+
+    public required DateTime CompletedAtUtc { get; init; }
+}
 
 public static class OfflineDataReader
 {
@@ -46,6 +51,7 @@ public static class OfflineDataReader
     internal static ChunkAnalysisResult AnalyzeChunk(string chunkFile)
     {
         var chunkFileName = Path.GetFileName(chunkFile);
+        var startedAtUtc = DateTime.UtcNow;
         var chunkEventPayloadBytes = 0L;
         var chunkEventRecordBytes = 0L;
         DateTime? lastEventTimestampUtc = null;
@@ -75,7 +81,11 @@ public static class OfflineDataReader
             Math.Max(0, chunkSizeBytes - chunkEventRecordBytes).ToString("N0", CultureInfo.InvariantCulture),
             Math.Max(0, chunkSizeBytes - chunkEventRecordBytes) / 1024d / 1024d);
 
-        return new ChunkAnalysisResult(chunkFile, summary, aggregator.Snapshot(), lastEventTimestampUtc);
+        return new ChunkAnalysisResult(chunkFile, summary, aggregator.Snapshot(), lastEventTimestampUtc)
+        {
+            StartedAtUtc = startedAtUtc,
+            CompletedAtUtc = DateTime.UtcNow
+        };
     }
 
     internal static IEnumerable<AnalysisEventRecord> ReadLogicalRecords(
