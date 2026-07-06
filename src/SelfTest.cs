@@ -112,9 +112,15 @@ public static class SelfTest
         }
 
         var progressLine = ChunkProgressFormatter.FormatProgressMessage(5, 10, TimeSpan.FromSeconds(2), "chunk-000005", DateTime.UnixEpoch, DateTime.UnixEpoch.AddSeconds(2));
-        if (!progressLine.Contains("50.0%", StringComparison.Ordinal) || !progressLine.Contains("2.5 chunk files/sec", StringComparison.Ordinal) || !progressLine.Contains("chunk-000005", StringComparison.Ordinal) || !progressLine.Contains("start=1970-01-01T00:00:00.0000000Z", StringComparison.Ordinal) || !progressLine.Contains("end=1970-01-01T00:00:02.0000000Z", StringComparison.Ordinal))
+        if (!progressLine.Contains("Chunk trace:", StringComparison.Ordinal) || !progressLine.Contains("50.0%", StringComparison.Ordinal) || !progressLine.Contains("2.5 chunk files/sec", StringComparison.Ordinal) || !progressLine.Contains("chunk-000005", StringComparison.Ordinal) || !progressLine.Contains("start=1970-01-01T00:00:00.0000000Z", StringComparison.Ordinal) || !progressLine.Contains("end=1970-01-01T00:00:02.0000000Z", StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Chunk progress formatting check failed.");
+        }
+
+        var configLine = AppConfiguration.FormatOfflineRunConfiguration(@"C:\Data", @"C:\temp\es-analysis-report.20260706130732153.json", 2, new ReportOutputOptions(false, true, false));
+        if (!configLine.Contains("Offline run config:", StringComparison.Ordinal) || !configLine.Contains(@"dataPath='C:\Data'", StringComparison.Ordinal) || !configLine.Contains("maxConcurrentChunkFiles=2", StringComparison.Ordinal) || !configLine.Contains("outputOptions(payloadValues=False, eventGroups=True, chunkFiles=False)", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Offline run configuration formatting check failed.");
         }
 
         var tempDirectory = Path.Combine(Path.GetTempPath(), $"es-analyser-selftest-{Guid.NewGuid():N}");
@@ -152,6 +158,8 @@ public static class SelfTest
 
             using var gateZero = new ManualResetEventSlim(false);
             using var gateOne = new ManualResetEventSlim(false);
+            var startOrder = new List<string>();
+            var startOrderLock = new object();
             var callbackOrder = new string[orderedChunkFiles.Length];
             var callbackCount = 0;
 
@@ -177,6 +185,11 @@ public static class SelfTest
                     (chunkFile, _) =>
                     {
                         var fileName = Path.GetFileName(chunkFile);
+                        lock (startOrderLock)
+                        {
+                            startOrder.Add(fileName);
+                        }
+
                         if (fileName == "chunk-000000")
                         {
                             gateZero.Wait();
@@ -189,9 +202,9 @@ public static class SelfTest
                         return CreateStubChunkResult(chunkFile);
                     });
 
-                if (callbackCount != orderedChunkFiles.Length || !orderedChunkFiles.SequenceEqual(callbackOrder) || !orderedChunkFiles.SequenceEqual(orderedResults.Select(result => result.ChunkFile)))
+                if (callbackCount != orderedChunkFiles.Length || !orderedChunkFiles.SequenceEqual(callbackOrder) || !orderedChunkFiles.Select(Path.GetFileName).SequenceEqual(startOrder) || !orderedChunkFiles.SequenceEqual(orderedResults.Select(result => result.ChunkFile)))
                 {
-                    throw new InvalidOperationException("Ordered chunk completion check failed.");
+                    throw new InvalidOperationException("Ordered chunk pickup check failed.");
                 }
             }
             finally

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using ESAnalyser.Analysis;
 
 namespace ESAnalyser;
 
@@ -52,5 +53,13 @@ internal static class AppConfiguration
         }
 
         return int.TryParse(value, out var parsed) && parsed > 0 ? parsed : defaultValue;
+    }
+
+    public static string FormatOfflineRunConfiguration(string dataPath, string outputTarget, int maxConcurrentChunkFiles, ReportOutputOptions outputOptions)
+    {
+        return
+            $"Offline run config: dataPath='{dataPath}' | outputTarget='{outputTarget}' | " +
+            $"maxConcurrentChunkFiles={maxConcurrentChunkFiles.ToString(System.Globalization.CultureInfo.InvariantCulture)} | " +
+            $"outputOptions(payloadValues={outputOptions.IncludePayloadValues}, eventGroups={outputOptions.IncludeEventGroups}, chunkFiles={outputOptions.IncludeChunkFiles})";
     }
 }
