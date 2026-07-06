@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "ESAnalyser": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "development"
+      }
+    }
+  }
+}

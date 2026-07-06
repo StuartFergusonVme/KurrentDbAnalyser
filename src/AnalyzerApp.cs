@@ -8,7 +8,7 @@ namespace ESAnalyser;
 
 public static class AnalyzerApp
 {
-    private static readonly object ConsoleTraceLock = new();
+    private static readonly object ConsoleStatusLock = new();
 
     public static async Task<int> RunAsync(string[] args)
     {
@@ -35,7 +35,7 @@ public static class AnalyzerApp
                 var configuration = AppConfiguration.Load();
                 var maxConcurrentChunkFiles = AppConfiguration.GetIntValue(configuration, "OfflineReport:MaxConcurrentChunkFiles", 1);
 
-                await WriteOfflineReportAsync(path, Console.Out, CancellationToken.None, outputOptions, maxConcurrentChunkFiles);
+                await WriteOfflineReportAsync(path, Console.Out, CancellationToken.None, outputOptions, maxConcurrentChunkFiles, Console.Error);
                 return 0;
             }
 
@@ -70,17 +70,30 @@ public static class AnalyzerApp
     public static ReportEnvelope AnalyzeOffline(string dataPath, int maxConcurrentChunkFiles) =>
         AnalyzeOffline(dataPath, maxConcurrentChunkFiles, CancellationToken.None);
 
-    public static ReportEnvelope AnalyzeOffline(string dataPath, int maxConcurrentChunkFiles, CancellationToken cancellationToken, Action<ChunkAnalysisResult>? chunkCompleted = null)
+    public static ReportEnvelope AnalyzeOffline(string dataPath, int maxConcurrentChunkFiles, CancellationToken cancellationToken, Action<ChunkAnalysisResult>? chunkCompleted = null, TextWriter? statusWriter = null)
     {
         var generatedAtUtc = DateTime.UtcNow;
         var chunkFiles = ChunkDirectoryScanner.EnumerateChunkFiles(dataPath).ToArray();
+        WriteChunkDiscoveryStatus(statusWriter, dataPath, chunkFiles.Length);
 
         if (chunkFiles.Length == 0)
         {
             return CreateReport("offline", Array.Empty<EventGroup>(), null, null, 0, generatedAtUtc);
         }
 
-        var chunkResults = AnalyzeChunkFiles(chunkFiles, maxConcurrentChunkFiles, cancellationToken, chunkCompleted);
+        var progressTimer = System.Diagnostics.Stopwatch.StartNew();
+        var completedChunkCount = 0;
+        Action<ChunkAnalysisResult>? chunkCompletedWithProgress = chunkResult =>
+        {
+            chunkCompleted?.Invoke(chunkResult);
+            if (statusWriter is not null)
+            {
+                var completed = Interlocked.Increment(ref completedChunkCount);
+                WriteChunkProgressStatus(statusWriter, completed, chunkFiles.Length, progressTimer.Elapsed, chunkResult.ChunkFileSummary.ChunkFile);
+            }
+        };
+
+        var chunkResults = AnalyzeChunkFiles(chunkFiles, maxConcurrentChunkFiles, cancellationToken, chunkCompletedWithProgress);
         var aggregator = new EventAggregator();
         string? currentChunk = null;
         DateTime? lastEventTimestampUtc = null;
@@ -116,7 +129,7 @@ public static class AnalyzerApp
 
     public static async Task WriteOfflineReportAsync(string dataPath, TextWriter writer, CancellationToken cancellationToken)
     {
-        await WriteOfflineReportAsync(dataPath, writer, cancellationToken, new ReportOutputOptions(false, true, false));
+        await WriteOfflineReportAsync(dataPath, writer, cancellationToken, new ReportOutputOptions(false, true, false), 1);
     }
 
     public static async Task WriteOfflineReportAsync(string dataPath, TextWriter writer, CancellationToken cancellationToken, ReportOutputOptions outputOptions)
@@ -124,9 +137,9 @@ public static class AnalyzerApp
         await WriteOfflineReportAsync(dataPath, writer, cancellationToken, outputOptions, 1);
     }
 
-    public static async Task WriteOfflineReportAsync(string dataPath, TextWriter writer, CancellationToken cancellationToken, ReportOutputOptions outputOptions, int maxConcurrentChunkFiles)
+    public static async Task WriteOfflineReportAsync(string dataPath, TextWriter writer, CancellationToken cancellationToken, ReportOutputOptions outputOptions, int maxConcurrentChunkFiles, TextWriter? statusWriter = null)
     {
-        var report = AnalyzeOffline(dataPath, maxConcurrentChunkFiles, cancellationToken);
+        var report = AnalyzeOffline(dataPath, maxConcurrentChunkFiles, cancellationToken, null, statusWriter);
         await JsonReportWriter.WriteAsync(report, writer, cancellationToken, outputOptions);
     }
 
@@ -135,7 +148,7 @@ public static class AnalyzerApp
         await WriteOfflineReportAsync(dataPath, outputPath, cancellationToken, outputOptions, 1);
     }
 
-    public static async Task WriteOfflineReportAsync(string dataPath, string outputPath, CancellationToken cancellationToken, ReportOutputOptions? outputOptions, int maxConcurrentChunkFiles)
+    public static async Task WriteOfflineReportAsync(string dataPath, string outputPath, CancellationToken cancellationToken, ReportOutputOptions? outputOptions, int maxConcurrentChunkFiles, TextWriter? statusWriter = null)
     {
         var actualOutputOptions = outputOptions ?? new ReportOutputOptions(false, true, false);
         var statePath = OfflineReportStateStore.GetStatePath(outputPath);
@@ -143,7 +156,8 @@ public static class AnalyzerApp
             dataPath,
             maxConcurrentChunkFiles,
             cancellationToken,
-            chunkResult => OfflineReportStateStore.MergeChunkAndPublish(statePath, outputPath, chunkResult, cancellationToken, actualOutputOptions));
+            chunkResult => OfflineReportStateStore.MergeChunkAndPublish(statePath, outputPath, chunkResult, cancellationToken, actualOutputOptions),
+            statusWriter);
         var finalReport = OfflineReportStateStore.LoadSnapshot(statePath) ?? report;
         await JsonReportWriter.WriteAsync(finalReport, outputPath, cancellationToken, actualOutputOptions);
     }
@@ -163,7 +177,7 @@ public static class AnalyzerApp
             for (var i = 0; i < chunkFiles.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                results[i] = AnalyzeChunkWithTrace(chunkFiles[i], cancellationToken);
+                results[i] = AnalyzeChunkWithCancellation(chunkFiles[i], cancellationToken);
                 chunkCompleted?.Invoke(results[i]);
             }
 
@@ -179,43 +193,52 @@ public static class AnalyzerApp
 
         Parallel.ForEach(Enumerable.Range(0, chunkFiles.Length), parallelOptions, index =>
         {
-            results[index] = AnalyzeChunkWithTrace(chunkFiles[index], cancellationToken);
+            results[index] = AnalyzeChunkWithCancellation(chunkFiles[index], cancellationToken);
             chunkCompleted?.Invoke(results[index]);
         });
 
         return results;
     }
 
-    private static ChunkAnalysisResult AnalyzeChunkWithTrace(string chunkFile, CancellationToken cancellationToken)
+    private static ChunkAnalysisResult AnalyzeChunkWithCancellation(string chunkFile, CancellationToken cancellationToken)
     {
-        var chunkName = Path.GetFileName(chunkFile);
-        var startedAt = DateTimeOffset.Now;
-        TraceChunkEvent("START", chunkName, startedAt, null);
-
-        try
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            return OfflineDataReader.AnalyzeChunk(chunkFile);
-        }
-        finally
-        {
-            var finishedAt = DateTimeOffset.Now;
-            TraceChunkEvent("FINISH", chunkName, startedAt, finishedAt);
-        }
+        cancellationToken.ThrowIfCancellationRequested();
+        return OfflineDataReader.AnalyzeChunk(chunkFile);
     }
 
-    private static void TraceChunkEvent(string phase, string chunkName, DateTimeOffset startedAt, DateTimeOffset? finishedAt)
+    private static void WriteChunkDiscoveryStatus(TextWriter? statusWriter, string dataPath, int totalChunkFiles)
     {
-        lock (ConsoleTraceLock)
+        if (statusWriter is null)
         {
-            if (finishedAt is null)
-            {
-                Console.WriteLine($"[{startedAt:O}] {phase} chunk {chunkName}");
-                return;
-            }
+            return;
+        }
 
-            var duration = finishedAt.Value - startedAt;
-            Console.WriteLine($"[{finishedAt:O}] {phase} chunk {chunkName} after {duration.TotalMilliseconds:N0} ms");
+        WriteStatusLine(statusWriter, ChunkProgressFormatter.FormatDiscoveryMessage(dataPath, totalChunkFiles));
+    }
+
+    private static void WriteChunkProgressStatus(TextWriter? statusWriter, int completedChunkFiles, int totalChunkFiles, TimeSpan elapsed, string currentChunkFile)
+    {
+        if (statusWriter is null)
+        {
+            return;
+        }
+
+        WriteStatusLine(statusWriter, ChunkProgressFormatter.FormatProgressMessage(completedChunkFiles, totalChunkFiles, elapsed, currentChunkFile));
+    }
+
+    private static void WriteStatusLine(TextWriter statusWriter, string message)
+    {
+        lock (ConsoleStatusLock)
+        {
+            try
+            {
+                statusWriter.WriteLine(message);
+                statusWriter.Flush();
+            }
+            catch
+            {
+                // Progress output is advisory only and must never stop the scan.
+            }
         }
     }
 

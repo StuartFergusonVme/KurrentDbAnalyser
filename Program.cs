@@ -1,7 +1,6 @@
 using ESAnalyser;
 using ESAnalyser.Analysis;
 using System.Globalization;
-using System.Text;
 
 if (args.Length > 0)
 {
@@ -20,7 +19,7 @@ var options = new ReportOutputOptions(
     IncludeEventGroups: AppConfiguration.GetBoolValue(configuration, "OfflineReport:OutputOptions:IncludeEventGroups", true),
     IncludeChunkFiles: AppConfiguration.GetBoolValue(configuration, "OfflineReport:OutputOptions:IncludeChunkFiles", false));
 
-await AnalyzerApp.WriteOfflineReportAsync(dataPath, outputPath, CancellationToken.None, options, maxConcurrentChunkFiles);
+await AnalyzerApp.WriteOfflineReportAsync(dataPath, outputPath, CancellationToken.None, options, maxConcurrentChunkFiles, Console.Error);
 System.Console.WriteLine($"Report written to {outputPath}");
 Console.ReadKey();
 

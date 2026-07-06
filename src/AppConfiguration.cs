@@ -13,9 +13,9 @@ internal static class AppConfiguration
         var environment = Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT")
             ?? Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT");
 
-        if (string.Equals(environment, "Development", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(environment, "development", StringComparison.OrdinalIgnoreCase))
         {
-            builder.AddJsonFile("appsettings.Development.json", optional: true, reloadOnChange: false);
+            builder.AddJsonFile("appsettings.development.json", optional: true, reloadOnChange: false);
         }
 
         return builder.Build();
