@@ -89,7 +89,14 @@ public static class AnalyzerApp
             if (statusWriter is not null)
             {
                 var completed = Interlocked.Increment(ref completedChunkCount);
-                WriteChunkProgressStatus(statusWriter, completed, chunkFiles.Length, progressTimer.Elapsed, chunkResult.ChunkFileSummary.ChunkFile);
+                WriteChunkProgressStatus(
+                    statusWriter,
+                    completed,
+                    chunkFiles.Length,
+                    progressTimer.Elapsed,
+                    chunkResult.ChunkFileSummary.ChunkFile,
+                    chunkResult.StartedAtUtc,
+                    chunkResult.CompletedAtUtc);
             }
         };
 
@@ -162,10 +169,17 @@ public static class AnalyzerApp
         await JsonReportWriter.WriteAsync(finalReport, outputPath, cancellationToken, actualOutputOptions);
     }
 
-    private static ChunkAnalysisResult[] AnalyzeChunkFiles(string[] chunkFiles, int maxConcurrentChunkFiles, CancellationToken cancellationToken, Action<ChunkAnalysisResult>? chunkCompleted = null)
+    internal static ChunkAnalysisResult[] AnalyzeChunkFiles(
+        string[] chunkFiles,
+        int maxConcurrentChunkFiles,
+        CancellationToken cancellationToken,
+        Action<ChunkAnalysisResult>? chunkCompleted = null,
+        Func<string, CancellationToken, ChunkAnalysisResult>? analyzeChunk = null)
     {
         maxConcurrentChunkFiles = Math.Max(1, maxConcurrentChunkFiles);
         var results = new ChunkAnalysisResult[chunkFiles.Length];
+        var completedResults = new ChunkAnalysisResult?[chunkFiles.Length];
+        var analyzeChunkCore = analyzeChunk ?? AnalyzeChunkWithCancellation;
 
         if (chunkFiles.Length == 0)
         {
@@ -177,24 +191,39 @@ public static class AnalyzerApp
             for (var i = 0; i < chunkFiles.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                results[i] = AnalyzeChunkWithCancellation(chunkFiles[i], cancellationToken);
+                results[i] = analyzeChunkCore(chunkFiles[i], cancellationToken);
                 chunkCompleted?.Invoke(results[i]);
             }
 
             return results;
         }
 
-        // Analyze each chunk independently, then merge the ordered results after all workers finish.
+        // Analyze each chunk independently, then emit completions in the original file order.
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = maxConcurrentChunkFiles,
             CancellationToken = cancellationToken
         };
+        var nextCompletedIndex = 0;
+        var completionLock = new object();
 
         Parallel.ForEach(Enumerable.Range(0, chunkFiles.Length), parallelOptions, index =>
         {
-            results[index] = AnalyzeChunkWithCancellation(chunkFiles[index], cancellationToken);
-            chunkCompleted?.Invoke(results[index]);
+            var result = analyzeChunkCore(chunkFiles[index], cancellationToken);
+
+            // Preserve the original chunk-file order for observable completions, even though
+            // the analysis itself still runs in parallel.
+            lock (completionLock)
+            {
+                results[index] = result;
+                completedResults[index] = result;
+
+                while (nextCompletedIndex < completedResults.Length && completedResults[nextCompletedIndex] is not null)
+                {
+                    chunkCompleted?.Invoke(completedResults[nextCompletedIndex]!);
+                    nextCompletedIndex++;
+                }
+            }
         });
 
         return results;
@@ -216,14 +245,21 @@ public static class AnalyzerApp
         WriteStatusLine(statusWriter, ChunkProgressFormatter.FormatDiscoveryMessage(dataPath, totalChunkFiles));
     }
 
-    private static void WriteChunkProgressStatus(TextWriter? statusWriter, int completedChunkFiles, int totalChunkFiles, TimeSpan elapsed, string currentChunkFile)
+    private static void WriteChunkProgressStatus(
+        TextWriter? statusWriter,
+        int completedChunkFiles,
+        int totalChunkFiles,
+        TimeSpan elapsed,
+        string currentChunkFile,
+        DateTime startedAtUtc,
+        DateTime completedAtUtc)
     {
         if (statusWriter is null)
         {
             return;
         }
 
-        WriteStatusLine(statusWriter, ChunkProgressFormatter.FormatProgressMessage(completedChunkFiles, totalChunkFiles, elapsed, currentChunkFile));
+        WriteStatusLine(statusWriter, ChunkProgressFormatter.FormatProgressMessage(completedChunkFiles, totalChunkFiles, elapsed, currentChunkFile, startedAtUtc, completedAtUtc));
     }
 
     private static void WriteStatusLine(TextWriter statusWriter, string message)
