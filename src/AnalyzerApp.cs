@@ -2,6 +2,7 @@ using ESAnalyser.Analysis;
 using ESAnalyser.Live;
 using ESAnalyser.Offline;
 using ESAnalyser.Output;
+using System.Collections.Concurrent;
 using System.Globalization;
 
 namespace ESAnalyser;
@@ -35,6 +36,7 @@ public static class AnalyzerApp
                 var configuration = AppConfiguration.Load();
                 var maxConcurrentChunkFiles = AppConfiguration.GetIntValue(configuration, "OfflineReport:MaxConcurrentChunkFiles", 1);
 
+                WriteStatusLine(Console.Error, AppConfiguration.FormatOfflineRunConfiguration(path, "stdout", maxConcurrentChunkFiles, outputOptions));
                 await WriteOfflineReportAsync(path, Console.Out, CancellationToken.None, outputOptions, maxConcurrentChunkFiles, Console.Error);
                 return 0;
             }
@@ -198,33 +200,54 @@ public static class AnalyzerApp
             return results;
         }
 
-        // Analyze each chunk independently, then emit completions in the original file order.
-        var parallelOptions = new ParallelOptions
-        {
-            MaxDegreeOfParallelism = maxConcurrentChunkFiles,
-            CancellationToken = cancellationToken
-        };
+        // Dispatch chunk files in FIFO order while allowing multiple workers to run at once.
+        var workerCount = Math.Min(maxConcurrentChunkFiles, chunkFiles.Length);
+        using var workQueue = new BlockingCollection<int>(new ConcurrentQueue<int>());
         var nextCompletedIndex = 0;
         var completionLock = new object();
 
-        Parallel.ForEach(Enumerable.Range(0, chunkFiles.Length), parallelOptions, index =>
-        {
-            var result = analyzeChunkCore(chunkFiles[index], cancellationToken);
-
-            // Preserve the original chunk-file order for observable completions, even though
-            // the analysis itself still runs in parallel.
-            lock (completionLock)
-            {
-                results[index] = result;
-                completedResults[index] = result;
-
-                while (nextCompletedIndex < completedResults.Length && completedResults[nextCompletedIndex] is not null)
+        var workerTasks = Enumerable.Range(0, workerCount)
+            .Select(_ => Task.Factory.StartNew(
+                () =>
                 {
-                    chunkCompleted?.Invoke(completedResults[nextCompletedIndex]!);
-                    nextCompletedIndex++;
-                }
+                    foreach (var index in workQueue.GetConsumingEnumerable(cancellationToken))
+                    {
+                        var result = analyzeChunkCore(chunkFiles[index], cancellationToken);
+
+                        // Preserve the original chunk-file order for observable completions, even though
+                        // the analysis itself still runs in parallel.
+                        lock (completionLock)
+                        {
+                            results[index] = result;
+                            completedResults[index] = result;
+
+                            while (nextCompletedIndex < completedResults.Length && completedResults[nextCompletedIndex] is not null)
+                            {
+                                chunkCompleted?.Invoke(completedResults[nextCompletedIndex]!);
+                                nextCompletedIndex++;
+                            }
+                        }
+                    }
+                },
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default))
+            .ToArray();
+
+        try
+        {
+            for (var index = 0; index < chunkFiles.Length; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                workQueue.Add(index, cancellationToken);
             }
-        });
+        }
+        finally
+        {
+            workQueue.CompleteAdding();
+        }
+
+        Task.WhenAll(workerTasks).GetAwaiter().GetResult();
 
         return results;
     }

@@ -25,7 +25,7 @@ internal static class ChunkProgressFormatter
         var duration = completedAtUtc >= startedAtUtc ? completedAtUtc - startedAtUtc : TimeSpan.Zero;
 
         return
-            $"Progress: {completedChunkFiles.ToString("N0", CultureInfo.InvariantCulture)}/{totalChunkFiles.ToString("N0", CultureInfo.InvariantCulture)} " +
+            $"Chunk trace: {completedChunkFiles.ToString("N0", CultureInfo.InvariantCulture)}/{totalChunkFiles.ToString("N0", CultureInfo.InvariantCulture)} " +
             $"({percentComplete.ToString("0.0", CultureInfo.InvariantCulture)}%) | " +
             $"{chunkFilesPerSecond.ToString("0.0", CultureInfo.InvariantCulture)} chunk files/sec | {currentChunkFile} | " +
             $"start={startedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)} | " +

@@ -19,6 +19,7 @@ var options = new ReportOutputOptions(
     IncludeEventGroups: AppConfiguration.GetBoolValue(configuration, "OfflineReport:OutputOptions:IncludeEventGroups", true),
     IncludeChunkFiles: AppConfiguration.GetBoolValue(configuration, "OfflineReport:OutputOptions:IncludeChunkFiles", false));
 
+Console.Error.WriteLine(AppConfiguration.FormatOfflineRunConfiguration(dataPath, outputPath, maxConcurrentChunkFiles, options));
 await AnalyzerApp.WriteOfflineReportAsync(dataPath, outputPath, CancellationToken.None, options, maxConcurrentChunkFiles, Console.Error);
 System.Console.WriteLine($"Report written to {outputPath}");
 Console.ReadKey();
