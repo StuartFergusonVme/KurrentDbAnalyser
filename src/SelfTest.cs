@@ -1,4 +1,5 @@
 using ESAnalyser.Analysis;
+using ESAnalyser.Offline;
 using ESAnalyser.Output;
 using System.Globalization;
 using System.IO;
@@ -102,6 +103,34 @@ public static class SelfTest
         if (!verboseJson.Contains("completedAtUtc") || !verboseJson.Contains("totalPayloadSizeDisplay") || !verboseJson.Contains("groups") || !verboseJson.Contains("totalEmptySpaceBytesDisplay") || verboseJson.Contains("chunkFiles"))
         {
             throw new InvalidOperationException("Verbose output shape check failed.");
+        }
+
+        var progressDiscovery = ChunkProgressFormatter.FormatDiscoveryMessage(@"C:\Data", 3);
+        if (!progressDiscovery.Contains("3 chunk files", StringComparison.Ordinal) || !progressDiscovery.Contains(@"C:\Data", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Chunk discovery progress formatting check failed.");
+        }
+
+        var progressLine = ChunkProgressFormatter.FormatProgressMessage(5, 10, TimeSpan.FromSeconds(2), "chunk-000005");
+        if (!progressLine.Contains("50.0%", StringComparison.Ordinal) || !progressLine.Contains("2.5 chunk files/sec", StringComparison.Ordinal) || !progressLine.Contains("chunk-000005", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Chunk progress formatting check failed.");
+        }
+
+        var tempDirectory = Path.Combine(Path.GetTempPath(), $"es-analyser-selftest-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(tempDirectory);
+        try
+        {
+            using var statusWriter = new StringWriter();
+            var emptyReport = AnalyzerApp.AnalyzeOffline(tempDirectory, 1, CancellationToken.None, statusWriter: statusWriter);
+            if (emptyReport.TotalCount != 0 || !statusWriter.ToString().Contains("No chunk files found in", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Offline chunk discovery integration check failed.");
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDirectory, true);
         }
 
         Console.WriteLine("Self-test passed.");
