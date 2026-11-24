@@ -102,7 +102,8 @@ public static class AnalyzerApp
             }
         };
 
-        var chunkResults = AnalyzeChunkFiles(chunkFiles, maxConcurrentChunkFiles, cancellationToken, chunkCompletedWithProgress);
+        var chunkResults = AnalyzeChunkFiles(chunkFiles, maxConcurrentChunkFiles, cancellationToken, chunkCompletedWithProgress,
+                                            statusWriter: statusWriter, chunkSkipped: _ => Interlocked.Increment(ref completedChunkCount));
         var aggregator = new EventAggregator();
         string? currentChunk = null;
         DateTime? lastEventTimestampUtc = null;
@@ -176,16 +177,19 @@ public static class AnalyzerApp
         int maxConcurrentChunkFiles,
         CancellationToken cancellationToken,
         Action<ChunkAnalysisResult>? chunkCompleted = null,
-        Func<string, CancellationToken, ChunkAnalysisResult>? analyzeChunk = null)
+        Func<string, CancellationToken, ChunkAnalysisResult>? analyzeChunk = null,
+        TextWriter? statusWriter = null,
+        Action<String>? chunkSkipped = null)
     {
         maxConcurrentChunkFiles = Math.Max(1, maxConcurrentChunkFiles);
-        var results = new ChunkAnalysisResult[chunkFiles.Length];
+        ChunkAnalysisResult?[] results = new ChunkAnalysisResult?[chunkFiles.Length];
         var completedResults = new ChunkAnalysisResult?[chunkFiles.Length];
+        Boolean[] processed = new Boolean[chunkFiles.Length];
         var analyzeChunkCore = analyzeChunk ?? AnalyzeChunkWithCancellation;
 
         if (chunkFiles.Length == 0)
         {
-            return results;
+            return Array.Empty<ChunkAnalysisResult>();
         }
 
         if (maxConcurrentChunkFiles == 1 || chunkFiles.Length == 1)
@@ -193,11 +197,19 @@ public static class AnalyzerApp
             for (var i = 0; i < chunkFiles.Length; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                results[i] = analyzeChunkCore(chunkFiles[i], cancellationToken);
-                chunkCompleted?.Invoke(results[i]);
+                ChunkAnalysisResult? result = TryAnalyzeChunk(chunkFiles[i]);
+                results[i] = result;
+                if (result is not null)
+                {
+                    chunkCompleted?.Invoke(result);
+                }
+                else
+                {
+                    chunkSkipped?.Invoke(chunkFiles[i]);
+                }
             }
 
-            return results;
+            return results.OfType<ChunkAnalysisResult>().ToArray();
         }
 
         // Dispatch chunk files in FIFO order while allowing multiple workers to run at once.
@@ -212,7 +224,7 @@ public static class AnalyzerApp
                 {
                     foreach (var index in workQueue.GetConsumingEnumerable(cancellationToken))
                     {
-                        var result = analyzeChunkCore(chunkFiles[index], cancellationToken);
+                        ChunkAnalysisResult? result = TryAnalyzeChunk(chunkFiles[index]);
 
                         // Preserve the original chunk-file order for observable completions, even though
                         // the analysis itself still runs in parallel.
@@ -220,10 +232,19 @@ public static class AnalyzerApp
                         {
                             results[index] = result;
                             completedResults[index] = result;
+                            processed[index] = true;
 
-                            while (nextCompletedIndex < completedResults.Length && completedResults[nextCompletedIndex] is not null)
+                            while (nextCompletedIndex < completedResults.Length && processed[nextCompletedIndex])
                             {
-                                chunkCompleted?.Invoke(completedResults[nextCompletedIndex]!);
+                                if (completedResults[nextCompletedIndex] is ChunkAnalysisResult completedResult)
+                                {
+                                    chunkCompleted?.Invoke(completedResult);
+                                }
+                                else
+                                {
+                                    chunkSkipped?.Invoke(chunkFiles[nextCompletedIndex]);
+                                }
+
                                 nextCompletedIndex++;
                             }
                         }
@@ -249,7 +270,23 @@ public static class AnalyzerApp
 
         Task.WhenAll(workerTasks).GetAwaiter().GetResult();
 
-        return results;
+        return results.OfType<ChunkAnalysisResult>().ToArray();
+
+        ChunkAnalysisResult? TryAnalyzeChunk(String chunkFile)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return analyzeChunkCore(chunkFile, cancellationToken);
+            }
+            catch (IOException exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
+            {
+                WriteStatusLine(statusWriter ?? Console.Error,
+                                $"WARNING: Chunk file '{chunkFile}' is no longer available. Skipping it and continuing with the next chunk. " +
+                                "It may have been removed by scavenging; the analysis results will exclude this chunk.");
+                return null;
+            }
+        }
     }
 
     private static ChunkAnalysisResult AnalyzeChunkWithCancellation(string chunkFile, CancellationToken cancellationToken)
