@@ -128,6 +128,8 @@ public static class SelfTest
         Directory.CreateDirectory(tempDirectory);
         try
         {
+            SelfTest.CheckMissingChunks(tempDirectory);
+
             using var statusWriter = new StringWriter();
             var emptyReport = AnalyzerApp.AnalyzeOffline(tempDirectory, 1, CancellationToken.None, statusWriter: statusWriter);
             if (emptyReport.TotalCount != 0 || !statusWriter.ToString().Contains("No chunk files found in", StringComparison.Ordinal))
@@ -222,5 +224,98 @@ public static class SelfTest
         }
 
         Console.WriteLine("Self-test passed.");
+    }
+
+    private static void CheckMissingChunks(String tempDirectory)
+    {
+        foreach (Int32 concurrency in new[] { 1, 3 })
+        {
+            String[] chunkFiles = Enumerable.Range(0, 5)
+                                            .Select(index => Path.Combine(tempDirectory, $"missing-test-{concurrency}-{index}"))
+                                            .ToArray();
+            foreach (String chunkFile in chunkFiles)
+            {
+                File.WriteAllBytes(chunkFile, new Byte[128]);
+            }
+
+            using StringWriter warnings = new();
+            List<String> published = new();
+            List<String> skipped = new();
+            ChunkAnalysisResult[] results = AnalyzerApp.AnalyzeChunkFiles(
+                chunkFiles,
+                concurrency,
+                CancellationToken.None,
+                result => published.Add(result.ChunkFile),
+                (chunkFile, _) =>
+                {
+                    // Simulate scavenging after discovery, including the first, middle and last chunks.
+                    if (Array.IndexOf(chunkFiles, chunkFile) % 2 == 0)
+                    {
+                        File.Delete(chunkFile);
+                    }
+
+                    return OfflineDataReader.AnalyzeChunk(chunkFile);
+                },
+                warnings,
+                chunkFile => skipped.Add(chunkFile));
+
+            String[] expectedFiles = new[] { chunkFiles[1], chunkFiles[3] };
+            if (!results.Select(result => result.ChunkFile).SequenceEqual(expectedFiles) ||
+                !published.SequenceEqual(expectedFiles) ||
+                !skipped.SequenceEqual(new[] { chunkFiles[0], chunkFiles[2], chunkFiles[4] }) ||
+                results.Sum(result => result.ChunkFileSummary.EmptySpaceBytes) != 256)
+            {
+                throw new InvalidOperationException($"Missing chunk continuation/checkpoint order check failed with concurrency {concurrency}.");
+            }
+
+            String warningText = warnings.ToString();
+            foreach (String missingFile in skipped)
+            {
+                if (!warningText.Contains($"WARNING: Chunk file '{missingFile}' is no longer available.", StringComparison.Ordinal))
+                {
+                    throw new InvalidOperationException("Missing chunk warning check failed.");
+                }
+            }
+
+            foreach (String chunkFile in chunkFiles)
+            {
+                File.Delete(chunkFile);
+            }
+
+            using StringWriter directoryWarnings = new();
+            ChunkAnalysisResult[] missingDirectoryResults = AnalyzerApp.AnalyzeChunkFiles(
+                new[] { Path.Combine(tempDirectory, "removed-directory", "chunk-000000") },
+                concurrency,
+                CancellationToken.None,
+                statusWriter: directoryWarnings);
+            if (missingDirectoryResults.Length != 0 || !directoryWarnings.ToString().Contains("WARNING:", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Missing chunk directory check failed.");
+            }
+
+            using StringWriter allMissingWarnings = new();
+            if (AnalyzerApp.AnalyzeChunkFiles(chunkFiles, concurrency, CancellationToken.None, statusWriter: allMissingWarnings).Length != 0)
+            {
+                throw new InvalidOperationException("All missing chunks check failed.");
+            }
+
+            foreach (Exception expected in new Exception[]
+                     {
+                         new IOException("Read failure"),
+                         new UnauthorizedAccessException("Access denied"),
+                         new OperationCanceledException()
+                     })
+            {
+                try
+                {
+                    AnalyzerApp.AnalyzeChunkFiles(chunkFiles, concurrency, CancellationToken.None, analyzeChunk: (_, _) => throw expected);
+                    throw new InvalidOperationException("An unrelated chunk failure was incorrectly skipped.");
+                }
+                catch (Exception actual) when (ReferenceEquals(actual, expected))
+                {
+                    // Only missing files/directories should be skipped.
+                }
+            }
+        }
     }
 }

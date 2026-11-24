@@ -89,6 +89,11 @@ internal static class ChunkRecordParser
             {
                 return new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, bufferSize: 4096, FileOptions.SequentialScan);
             }
+            catch (IOException ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+            {
+                // Scavenging can remove a chunk after the directory has been scanned.
+                throw;
+            }
             catch (IOException ex)
             {
                 lastError = ex;
