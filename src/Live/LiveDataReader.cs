@@ -9,6 +9,8 @@ public static class LiveDataReader
     public static async Task<IReadOnlyList<AnalysisEventRecord>> ReadAsync(string connectionString, CancellationToken cancellationToken)
     {
         using var client = KurrentDbClientFactory.Create(connectionString);
+        (String Message, Boolean IsWarning) scavengeStatus = await ScavengeStatusChecker.CheckLiveAsync(client, cancellationToken);
+        AnalyzerApp.WriteScavengeStatus(Console.Error, scavengeStatus);
         var result = client.ReadAllAsync(Direction.Forwards, Position.Start, long.MaxValue, resolveLinkTos: true, deadline: null, userCredentials: null, cancellationToken);
 
         var records = new List<AnalysisEventRecord>();

@@ -78,6 +78,10 @@ public static class AnalyzerApp
         var chunkFiles = ChunkDirectoryScanner.EnumerateChunkFiles(dataPath).ToArray();
         WriteChunkDiscoveryStatus(statusWriter, dataPath, chunkFiles.Length);
 
+        WriteStatusLine(statusWriter ?? Console.Error, "Checking scavenge history before analysing chunk files...");
+        (String Message, Boolean IsWarning) scavengeStatus = ScavengeStatusChecker.CheckOffline(chunkFiles, cancellationToken);
+        WriteScavengeStatus(statusWriter ?? Console.Error, scavengeStatus);
+
         if (chunkFiles.Length == 0)
         {
             return CreateReport("offline", Array.Empty<EventGroup>(), null, null, 0, generatedAtUtc);
@@ -297,6 +301,31 @@ public static class AnalyzerApp
             catch
             {
                 // Progress output is advisory only and must never stop the scan.
+            }
+        }
+    }
+
+    internal static void WriteScavengeStatus(TextWriter statusWriter, (String Message, Boolean IsWarning) status)
+    {
+        lock (ConsoleStatusLock)
+        {
+            Boolean useRed = status.IsWarning && ReferenceEquals(statusWriter, Console.Error) && !Console.IsErrorRedirected;
+            ConsoleColor originalColor = useRed ? Console.ForegroundColor : default;
+            try
+            {
+                if (useRed)
+                {
+                    Console.ForegroundColor = ConsoleColor.Red;
+                }
+
+                WriteStatusLine(statusWriter, status.Message);
+            }
+            finally
+            {
+                if (useRed)
+                {
+                    Console.ForegroundColor = originalColor;
+                }
             }
         }
     }
