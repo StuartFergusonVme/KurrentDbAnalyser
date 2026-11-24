@@ -10,6 +10,7 @@ public static class SelfTest
 {
     public static void Run()
     {
+        ScavengeSelfTest.Run();
         var aggregator = new EventAggregator();
         aggregator.Add(new EventRecord("Alpha", "stream-a", false, 10, 18));
         aggregator.Add(new EventRecord("Alpha", "stream-b", false, 14, 22));
