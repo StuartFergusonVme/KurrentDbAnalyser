@@ -57,7 +57,7 @@ internal static class ScavengeStatusChecker
 
             return history.GetStatus();
         }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             return ("WARNING: Unable to check scavenge history in the chunk files. " +
                     "A running scavenge could impact the analysis results.", true);
@@ -92,14 +92,10 @@ internal static class ScavengeStatusChecker
         {
             return history.GetStatus();
         }
-        catch (Exception exception) when (exception is Grpc.Core.RpcException or AccessDeniedException)
+        catch (Exception exception) when (exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             return ("WARNING: Unable to read scavenge history from the node (check connectivity and system-stream read permissions). " +
                     "A running scavenge could impact the analysis results.", true);
-        }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            return ("WARNING: The scavenge history check timed out. A running scavenge could impact the analysis results.", true);
         }
     }
 }

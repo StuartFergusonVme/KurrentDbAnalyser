@@ -309,22 +309,34 @@ public static class AnalyzerApp
     {
         lock (ConsoleStatusLock)
         {
-            Boolean useRed = status.IsWarning && ReferenceEquals(statusWriter, Console.Error) && !Console.IsErrorRedirected;
-            ConsoleColor originalColor = useRed ? Console.ForegroundColor : default;
+            ConsoleColor? originalColor = null;
             try
             {
-                if (useRed)
+                if (status.IsWarning && ReferenceEquals(statusWriter, Console.Error) && !Console.IsErrorRedirected)
                 {
+                    originalColor = Console.ForegroundColor;
                     Console.ForegroundColor = ConsoleColor.Red;
                 }
 
                 WriteStatusLine(statusWriter, status.Message);
             }
+            catch
+            {
+                // Colour support is optional; fall back to a plain warning.
+                WriteStatusLine(statusWriter, status.Message);
+            }
             finally
             {
-                if (useRed)
+                try
                 {
-                    Console.ForegroundColor = originalColor;
+                    if (originalColor.HasValue)
+                    {
+                        Console.ForegroundColor = originalColor.Value;
+                    }
+                }
+                catch
+                {
+                    // Console failures must never interrupt analysis.
                 }
             }
         }

@@ -20,6 +20,16 @@ internal static class ScavengeSelfTest
         history.Observe("$scavenges-second", "$scavengeStarted");
         ScavengeSelfTest.Assert(!history.GetStatus().IsWarning, "Completed runs must not warn, regardless of read order.");
 
+        IEnumerable<String> brokenHistory = Enumerable.Range(0, 1).Select<Int32, String>(_ => throw new InvalidOperationException("Unexpected history failure"));
+        ScavengeSelfTest.Assert(ScavengeStatusChecker.CheckOffline(brokenHistory, CancellationToken.None).IsWarning,
+            "Unexpected offline check failures must warn and return normally.");
+        IEnumerable<String> timedOutHistory = Enumerable.Range(0, 1).Select<Int32, String>(_ => throw new OperationCanceledException("Internal timeout"));
+        ScavengeSelfTest.Assert(ScavengeStatusChecker.CheckOffline(timedOutHistory, CancellationToken.None).IsWarning,
+            "Internal timeouts must not cancel the analysis.");
+        ScavengeSelfTest.Assert(ScavengeStatusChecker.CheckLiveAsync(null!, CancellationToken.None).GetAwaiter().GetResult().IsWarning,
+            "Unexpected live check failures must warn and return normally.");
+        AnalyzerApp.WriteScavengeStatus(new BrokenStatusWriter(), ("WARNING: Test", true));
+
         String directory = Path.Combine(Path.GetTempPath(), $"es-analyser-scavenge-selftest-{Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
         try
@@ -72,6 +82,14 @@ internal static class ScavengeSelfTest
         if (!condition)
         {
             throw new InvalidOperationException(message);
+        }
+    }
+
+    private sealed class BrokenStatusWriter : StringWriter
+    {
+        public override void WriteLine(String? value)
+        {
+            throw new InvalidOperationException("Status output unavailable");
         }
     }
 
